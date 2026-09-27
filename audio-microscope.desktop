@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Audio Microscope
+GenericName=Acoustic Event Review
+Comment=Capture, detect and review acoustic events
+Exec=/home/jason/audioscope/launch.sh
+Path=/home/jason/audioscope
+Icon=/home/jason/audioscope/app/gui/srp-css-theme-pack/assets/lary.png
+Terminal=false
+Categories=Audio;AudioVideo;
+
+Keywords=audio;acoustic;sound;monitoring;detection;review;
+StartupNotify=true
+StartupWMClass=Audio Microscope

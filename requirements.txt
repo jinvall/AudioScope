@@ -1,0 +1,20 @@
+# Audio Microscope - Python dependencies
+#
+# CPU-only.  No CUDA, no vendor GPU runtime.
+#
+#   python3 -m venv venv
+#   ./venv/bin/pip install -r requirements.txt
+
+# Core numeric and DSP work.
+numpy>=1.24
+scipy>=1.10          # firwin/upfirdn for the streaming resampler
+
+# Lossless WAV evidence I/O (docs/DATA_AND_STORAGE.md).
+soundfile>=0.12      # libsndfile bindings, float32 WAV
+
+# Device discovery, capture and playback.  Bundles PortAudio, so no system
+# portaudio package is required.
+sounddevice>=0.4.6
+
+# Test suite.
+pytest>=7.0

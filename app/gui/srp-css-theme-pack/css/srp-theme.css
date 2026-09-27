@@ -1,0 +1,369 @@
+/*
+  SRP Theme Pack
+  Version: 1.0.0
+  Notes:
+  - Drop-in CSS variables + component styles
+  - Designed from provided SRP brand assets (green accent + dark purple base)
+  - Debug-friendly: obvious variable names and comments
+*/
+
+:root,
+[data-theme="srp-dark"] {
+  /* Core palette */
+  --srp-bg: #0f0a18;
+  --srp-bg-elev-1: #161028;
+  --srp-bg-elev-2: #21163a;
+  --srp-surface: #1a1230;
+  --srp-surface-2: #231743;
+
+  --srp-text: #f3f3f7;
+  --srp-text-muted: #c8c9d4;
+  --srp-text-subtle: #9698ab;
+
+  --srp-primary: #12f012;
+  --srp-primary-strong: #1fff5b;
+  --srp-primary-soft: #7bff9a;
+  --srp-primary-contrast: #041105;
+
+  --srp-secondary: #7a2fff;
+  --srp-accent: #00d1ff;
+
+  --srp-border: #3d2d61;
+  --srp-border-strong: #5a4191;
+
+  --srp-success: #23d160;
+  --srp-warning: #ffb020;
+  --srp-danger: #ff4d6d;
+  --srp-info: #3fa8ff;
+
+  /* Motion + spacing + shape */
+  --srp-radius-sm: 8px;
+  --srp-radius-md: 12px;
+  --srp-radius-lg: 16px;
+  --srp-radius-xl: 24px;
+
+  --srp-space-1: 0.25rem;
+  --srp-space-2: 0.5rem;
+  --srp-space-3: 0.75rem;
+  --srp-space-4: 1rem;
+  --srp-space-5: 1.5rem;
+  --srp-space-6: 2rem;
+
+  --srp-shadow-1: 0 4px 14px rgba(0, 0, 0, 0.30);
+  --srp-shadow-2: 0 10px 28px rgba(0, 0, 0, 0.40);
+
+  --srp-transition-fast: 150ms ease;
+  --srp-transition-base: 250ms ease;
+
+  /* Optional background images */
+  --srp-bg-image: url("../assets/background.svg");
+  --srp-overlay-image: url("../assets/overlay.png");
+}
+
+/* Optional light flavor while preserving brand identity */
+[data-theme="srp-light"] {
+  --srp-bg: #f5f6fb;
+  --srp-bg-elev-1: #ffffff;
+  --srp-bg-elev-2: #f0ecff;
+  --srp-surface: #ffffff;
+  --srp-surface-2: #f5f0ff;
+
+  --srp-text: #1a1030;
+  --srp-text-muted: #4c4567;
+  --srp-text-subtle: #6c6692;
+
+  --srp-primary: #0ecf4d;
+  --srp-primary-strong: #0aba42;
+  --srp-primary-soft: #7cf2a4;
+  --srp-primary-contrast: #ffffff;
+
+  --srp-secondary: #6a3be6;
+  --srp-accent: #0f8edb;
+
+  --srp-border: #dbd5f0;
+  --srp-border-strong: #bcb0e0;
+
+  --srp-shadow-1: 0 4px 14px rgba(32, 20, 60, 0.10);
+  --srp-shadow-2: 0 10px 28px rgba(32, 20, 60, 0.18);
+}
+
+/* Global base */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--srp-bg);
+  color: var(--srp-text);
+  font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+}
+
+body.srp-background {
+  background-image: var(--srp-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+a {
+  color: var(--srp-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* Reusable layout container */
+.srp-container {
+  width: min(1100px, 92vw);
+  margin-inline: auto;
+  padding: var(--srp-space-5);
+}
+
+/* Cards */
+.srp-card {
+  background: linear-gradient(160deg, var(--srp-surface), var(--srp-surface-2));
+  border: 1px solid var(--srp-border);
+  border-radius: var(--srp-radius-lg);
+  box-shadow: var(--srp-shadow-1);
+  padding: var(--srp-space-5);
+}
+
+/* Buttons */
+.srp-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--srp-radius-md);
+  padding: 0.625rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--srp-transition-fast), box-shadow var(--srp-transition-fast), background var(--srp-transition-base);
+}
+
+.srp-btn:active {
+  transform: translateY(1px);
+}
+
+.srp-btn-primary {
+  background: linear-gradient(135deg, var(--srp-primary), var(--srp-primary-strong));
+  color: var(--srp-primary-contrast);
+  box-shadow: 0 8px 20px rgba(18, 240, 18, 0.25);
+}
+
+.srp-btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.srp-btn-secondary {
+  background: transparent;
+  border-color: var(--srp-border-strong);
+  color: var(--srp-text);
+}
+
+.srp-btn-secondary:hover {
+  background: rgba(122, 47, 255, 0.12);
+}
+
+/* Forms */
+.srp-input,
+.srp-select,
+.srp-textarea {
+  width: 100%;
+  border: 1px solid var(--srp-border);
+  border-radius: var(--srp-radius-md);
+  background: var(--srp-bg-elev-1);
+  color: var(--srp-text);
+  padding: 0.625rem 0.75rem;
+  outline: none;
+  transition: border-color var(--srp-transition-fast), box-shadow var(--srp-transition-fast);
+}
+
+.srp-input:focus,
+.srp-select:focus,
+.srp-textarea:focus {
+  border-color: var(--srp-primary);
+  box-shadow: 0 0 0 3px rgba(18, 240, 18, 0.20);
+}
+
+/* Topbar / branding */
+.srp-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--srp-space-4);
+  padding: var(--srp-space-3) var(--srp-space-5);
+  border-bottom: 1px solid var(--srp-border);
+  background: rgba(12, 8, 20, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.srp-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.srp-brand-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.srp-brand-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/* Utility badges */
+.srp-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--srp-border);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  color: var(--srp-text-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Status helpers */
+.srp-status-success { color: var(--srp-success); }
+.srp-status-warning { color: var(--srp-warning); }
+.srp-status-danger  { color: var(--srp-danger); }
+.srp-status-info    { color: var(--srp-info); }
+
+/* Debug helper class (safe to remove) */
+.srp-debug-outline * {
+  outline: 1px dashed rgba(63, 168, 255, 0.35);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Spectral Gradient
+   6-stop gradient: dark navy → violet → indigo → blue-purple → green → slate
+   ============================================================ */
+
+/* CSS custom properties for the spectral stops */
+:root,
+[data-theme="srp-dark"] {
+  --srp-spectral-0: #060119;
+  --srp-spectral-1: #2F076E;
+  --srp-spectral-2: #370150;
+  --srp-spectral-3: #5633C7;
+  --srp-spectral-4: #134E1A;
+  --srp-spectral-5: #65637E;
+}
+
+/* Full gradient background utility */
+.srp-spectral-bg {
+  background: linear-gradient(
+    90deg,
+    var(--srp-spectral-0) 0%,
+    var(--srp-spectral-1) 20%,
+    var(--srp-spectral-2) 40%,
+    var(--srp-spectral-3) 60%,
+    var(--srp-spectral-4) 80%,
+    var(--srp-spectral-5) 100%
+  );
+}
+
+/* Gradient as a thin accent bar */
+.srp-spectral-bar {
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--srp-spectral-0) 0%,
+    var(--srp-spectral-1) 20%,
+    var(--srp-spectral-2) 40%,
+    var(--srp-spectral-3) 60%,
+    var(--srp-spectral-4) 80%,
+    var(--srp-spectral-5) 100%
+  );
+  border-radius: var(--srp-radius-sm);
+}
+
+/* Gradient as a thick banner strip */
+.srp-spectral-banner {
+  height: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--srp-spectral-0) 0%,
+    var(--srp-spectral-1) 20%,
+    var(--srp-spectral-2) 40%,
+    var(--srp-spectral-3) 60%,
+    var(--srp-spectral-4) 80%,
+    var(--srp-spectral-5) 100%
+  );
+  border-radius: var(--srp-radius-md);
+}
+
+/* Gradient text (for headings) */
+.srp-spectral-text {
+  background: linear-gradient(
+    90deg,
+    var(--srp-spectral-0) 0%,
+    var(--srp-spectral-1) 20%,
+    var(--srp-spectral-2) 40%,
+    var(--srp-spectral-3) 60%,
+    var(--srp-spectral-4) 80%,
+    var(--srp-spectral-5) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Vertical gradient variant */
+.srp-spectral-bg-vertical {
+  background: linear-gradient(
+    180deg,
+    var(--srp-spectral-0) 0%,
+    var(--srp-spectral-1) 20%,
+    var(--srp-spectral-2) 40%,
+    var(--srp-spectral-3) 60%,
+    var(--srp-spectral-4) 80%,
+    var(--srp-spectral-5) 100%
+  );
+}
+
+/* Diagonal gradient variant */
+.srp-spectral-bg-diagonal {
+  background: linear-gradient(
+    135deg,
+    var(--srp-spectral-0) 0%,
+    var(--srp-spectral-1) 20%,
+    var(--srp-spectral-2) 40%,
+    var(--srp-spectral-3) 60%,
+    var(--srp-spectral-4) 80%,
+    var(--srp-spectral-5) 100%
+  );
+}
+
+/* Radial gradient variant */
+.srp-spectral-bg-radial {
+  background: radial-gradient(
+    circle at center,
+    var(--srp-spectral-5) 0%,
+    var(--srp-spectral-4) 20%,
+    var(--srp-spectral-3) 40%,
+    var(--srp-spectral-2) 60%,
+    var(--srp-spectral-1) 80%,
+    var(--srp-spectral-0) 100%
+  );
+}
+
+/* Individual stop utilities for custom compositions */
+.spectral-stop-0 { color: var(--srp-spectral-0); }
+.spectral-stop-1 { color: var(--srp-spectral-1); }
+.spectral-stop-2 { color: var(--srp-spectral-2); }
+.spectral-stop-3 { color: var(--srp-spectral-3); }
+.spectral-stop-4 { color: var(--srp-spectral-4); }
+.spectral-stop-5 { color: var(--srp-spectral-5); }
+
+.bg-spectral-stop-0 { background-color: var(--srp-spectral-0); }
+.bg-spectral-stop-1 { background-color: var(--srp-spectral-1); }
+.bg-spectral-stop-2 { background-color: var(--srp-spectral-2); }
+.bg-spectral-stop-3 { background-color: var(--srp-spectral-3); }
+.bg-spectral-stop-4 { background-color: var(--srp-spectral-4); }
+.bg-spectral-stop-5 { background-color: var(--srp-spectral-5); }

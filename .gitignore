@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Second virtual environment, for the separation model only (torch 2.5.1,
+# Python 3.10).  1.7 GB, and it cannot be replaced by `pip install -r`:
+# docs/SOURCE_SEPARATION.md section 17.2 explains the two pinned versions.
+venv-sep/
+
+# The separation model itself: vendored source plus 3.4 GB of weights that
+# are downloaded, not authored.  GitHub rejects files over 100 MB, so this
+# cannot be committed even if it were wanted.  To restore it, clone
+# https://github.com/Audio-AGI/AudioSep into third_party/AudioSep and fetch
+# audiosep_base_4M_steps.ckpt and music_speech_audioset_epoch_15_esc_89.98.pt
+# into its checkpoint/ directory.  docs/SOURCE_SEPARATION.md section 17.2
+# records the dependency versions that must accompany them.
+third_party/
+
+# Derived event index.  Deleting it loses nothing that is not in the event
+# directories (docs/DATA_AND_STORAGE.md section 10).
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Output written by tools, and partial writes from the atomic writers.  A
+# .part file is an interrupted write, never content.
+gui-snapshot.png
+*.png.part
+*.part
+
+# Captured evidence and recordings.  These are the user's data; never
+# committed, and never auto-deleted (docs/DATA_AND_STORAGE.md section 8).
+recordings/
+events/
+test_output/
+*.wav
+!tests/**/*.wav
+
+# Separation results.  Already covered by *.wav, but named so that a reader of
+# this file knows they are excluded on purpose: the audio is the user's, and
+# the fingerprint metadata beside it is small but still derived.
+separation_*/
+
+# Editor and OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# audio-microscope.desktop is deliberately NOT ignored: it is part of the
+# project and documents the launcher layout.  Its absolute paths are specific
+# to this machine, so the copy actually installed on a desktop lives in
+# ~/.local/share/applications and has to be edited per machine.

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en" data-theme="srp-dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SRP Theme Pack Preview</title>
+    <link rel="stylesheet" href="./css/srp-theme.css" />
+  </head>
+  <body class="srp-background">
+    <header class="srp-topbar">
+      <div class="srp-brand">
+        <img class="srp-brand-logo" src="./assets/logo-primary.svg" alt="SRP logo" />
+        <p class="srp-brand-title">SRP Theme Pack</p>
+        <span class="srp-badge">v1.0.0</span>
+      </div>
+      <button class="srp-btn srp-btn-secondary" id="toggle-theme">Toggle Theme</button>
+    </header>
+
+    <main class="srp-container">
+      <!-- Existing theme demo -->
+      <section class="srp-card">
+        <h1 style="margin-top:0">Drop-in Branding Theme</h1>
+        <p>
+          This preview demonstrates your generated SRP CSS theme based on the asset pack.
+        </p>
+        <p class="srp-status-info">Info text sample</p>
+        <p class="srp-status-success">Success text sample</p>
+        <p class="srp-status-warning">Warning text sample</p>
+        <p class="srp-status-danger">Danger text sample</p>
+
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin:1rem 0;">
+          <button class="srp-btn srp-btn-primary">Primary Action</button>
+          <button class="srp-btn srp-btn-secondary">Secondary</button>
+        </div>
+
+        <label for="demo-input">Input</label>
+        <input id="demo-input" class="srp-input" placeholder="Type here" />
+      </section>
+
+      <!-- Spectral Gradient Demo -->
+      <section class="srp-card" style="margin-top: 1.5rem;">
+        <h2 style="margin-top:0">Spectral Gradient</h2>
+        <p class="srp-text-muted">
+          6-stop spectral color gradient — dark navy → violet → indigo → blue-purple → green → slate.
+        </p>
+
+        <!-- Full-width bar -->
+        <div class="srp-spectral-bar" style="margin: 1rem 0;"></div>
+
+        <!-- Banner strip -->
+        <div class="srp-spectral-banner" style="margin: 1rem 0;"></div>
+
+        <!-- Gradient text -->
+        <h3 class="srp-spectral-text" style="font-size: 1.75rem; margin: 1rem 0;">
+          Spectral Gradient Heading
+        </h3>
+
+        <!-- Direction variants -->
+        <h4 style="margin: 1.5rem 0 0.5rem;">Direction Variants</h4>
+
+        <div style="margin: 0.5rem 0;">
+          <p class="srp-text-muted" style="margin: 0 0 0.25rem; font-size: 0.85rem;">Horizontal <code>.srp-spectral-bg</code></p>
+          <div class="srp-spectral-bg" style="height: 40px; border-radius: var(--srp-radius-md);"></div>
+        </div>
+
+        <div style="margin: 0.5rem 0;">
+          <p class="srp-text-muted" style="margin: 0 0 0.25rem; font-size: 0.85rem;">Vertical <code>.srp-spectral-bg-vertical</code></p>
+          <div class="srp-spectral-bg-vertical" style="height: 40px; border-radius: var(--srp-radius-md);"></div>
+        </div>
+
+        <div style="margin: 0.5rem 0;">
+          <p class="srp-text-muted" style="margin: 0 0 0.25rem; font-size: 0.85rem;">Diagonal <code>.srp-spectral-bg-diagonal</code></p>
+          <div class="srp-spectral-bg-diagonal" style="height: 40px; border-radius: var(--srp-radius-md);"></div>
+        </div>
+
+        <div style="margin: 0.5rem 0;">
+          <p class="srp-text-muted" style="margin: 0 0 0.25rem; font-size: 0.85rem;">Radial <code>.srp-spectral-bg-radial</code></p>
+          <div class="srp-spectral-bg-radial" style="height: 80px; border-radius: var(--srp-radius-md);"></div>
+        </div>
+
+        <!-- Individual stops -->
+        <h4 style="margin: 1.5rem 0 0.5rem;">Individual Stops</h4>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 80px; text-align: center;">
+            <div class="bg-spectral-stop-0" style="height: 32px; border-radius: var(--srp-radius-sm);"></div>
+            <code style="font-size: 0.75rem;">#060119</code>
+          </div>
+          <div style="flex: 1; min-width: 80px; text-align: center;">
+            <div class="bg-spectral-stop-1" style="height: 32px; border-radius: var(--srp-radius-sm);"></div>
+            <code style="font-size: 0.75rem;">#2F076E</code>
+          </div>
+          <div style="flex: 1; min-width: 80px; text-align: center;">
+            <div class="bg-spectral-stop-2" style="height: 32px; border-radius: var(--srp-radius-sm);"></div>
+            <code style="font-size: 0.75rem;">#370150</code>
+          </div>
+          <div style="flex: 1; min-width: 80px; text-align: center;">
+            <div class="bg-spectral-stop-3" style="height: 32px; border-radius: var(--srp-radius-sm);"></div>
+            <code style="font-size: 0.75rem;">#5633C7</code>
+          </div>
+          <div style="flex: 1; min-width: 80px; text-align: center;">
+            <div class="bg-spectral-stop-4" style="height: 32px; border-radius: var(--srp-radius-sm);"></div>
+            <code style="font-size: 0.75rem;">#134E1A</code>
+          </div>
+          <div style="flex: 1; min-width: 80px; text-align: center;">
+            <div class="bg-spectral-stop-5" style="height: 32px; border-radius: var(--srp-radius-sm);"></div>
+            <code style="font-size: 0.75rem;">#65637E</code>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./js/srp-theme.js"></script>
+    <script>
+      SRPTheme.initTheme("srp-dark");
+      document.getElementById("toggle-theme").addEventListener("click", () => {
+        const mode = SRPTheme.toggleTheme();
+        console.debug("[SRP_THEME_PREVIEW] toggled to", mode);
+      });
+    </script>
+  </body>
+</html>
