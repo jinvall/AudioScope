@@ -83,6 +83,209 @@ def read_event_audio(path: Optional[str], target_rate: int) -> np.ndarray:
 
 
 # ----------------------------------------------------------------------
+# Live capture status
+# ----------------------------------------------------------------------
+#: How old a published document may be before the reader stops trusting it.
+#: A capture process killed outright never publishes a final state, so a
+#: document claiming to be live is only believable while it keeps being
+#: rewritten.  Without this the window would show a healthy connection hours
+#: after the sender died - the exact lie this panel exists to prevent.
+LIVE_STATUS_STALE_SECONDS = 3.0
+
+#: dBFS floor for the level trace.  Matches the analysis noise floor's
+#: reporting range, so the strip is as legible as the measurements.
+LIVE_ENVELOPE_FLOOR_DB = -90.0
+
+
+def summarise_live_status(
+    document: Optional[dict], now: Optional[float] = None
+) -> dict:
+    """Turn a published live-status document into display-ready values.
+
+    Returns a dict that always has the same keys, whatever the document
+    contains or lacks, because the panel has to be able to say "capture is not
+    running" as clearly as it says "streaming".  Absence is reported as
+    absence; nothing here invents a value to fill a gap.
+    """
+    import time as _time
+
+    now = now if now is not None else _time.time()
+    if not document:
+        return {
+            "available": False,
+            "state": "unavailable",
+            "state_text": "Capture is not publishing status",
+            "detail": "No live status file. Is capture running?",
+            "address": None,
+            "level_dbfs": None,
+            "peak_dbfs": None,
+            "envelope": [],
+            "seconds_received": 0.0,
+            "bytes_received": 0,
+            "wire_rate_hz": None,
+            "wire_rate_origin": None,
+            "wire_format": None,
+            "port": None,
+            "age_seconds": None,
+            "stale": True,
+            "config_keys": [],
+            "amplification": None,
+            "dropped_bytes": 0,
+        }
+
+    published_at = document.get("published_at")
+    age = None
+    stale = False
+    if isinstance(published_at, (int, float)):
+        age = max(0.0, now - float(published_at))
+        stale = age > LIVE_STATUS_STALE_SECONDS
+
+    state = str(document.get("state") or "unknown")
+    clients = document.get("clients") or []
+    first = clients[0] if isinstance(clients, list) and clients else {}
+    if not isinstance(first, dict):
+        first = {}
+
+    seconds = 0.0
+    for client in clients:
+        if isinstance(client, dict):
+            try:
+                seconds += float(client.get("seconds_received") or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+    dropped = 0
+    for client in clients:
+        if isinstance(client, dict):
+            try:
+                dropped += int(client.get("dropped_bytes") or 0)
+            except (TypeError, ValueError):
+                continue
+
+    address = first.get("address")
+    origin = document.get("wire_rate_origin")
+
+    if stale:
+        state_text = "No update from capture"
+        detail = (
+            f"the last status was published {age:.1f}s ago, so the capture "
+            f"process is not running or has stopped publishing. Closing the "
+            f"review window stops capture, and the phone only streams to a "
+            f"running receiver."
+        )
+    else:
+        state_text, detail = _LIVE_STATE_TEXT.get(
+            state, (state.replace("_", " "), "")
+        )
+        if state == "waiting_for_client" and document.get("port"):
+            detail = f"{detail}  (listening on port {document['port']})"
+        if state == "streaming" and origin and origin != "declared":
+            detail = (
+                f"the sender did not declare its rate; "
+                f"{document.get('wire_rate_hz')} Hz is assumed"
+            )
+
+    return {
+        "available": True,
+        "state": state,
+        "state_text": state_text,
+        "detail": detail,
+        "address": address,
+        "level_dbfs": _as_float(document.get("level_dbfs")),
+        "peak_dbfs": _as_float(document.get("peak_dbfs")),
+        "envelope": live_envelope(document),
+        "seconds_received": round(seconds, 2),
+        "bytes_received": int(document.get("bytes_received") or 0),
+        "wire_rate_hz": document.get("wire_rate_hz"),
+        "wire_rate_origin": origin,
+        "wire_format": document.get("wire_format"),
+        "port": document.get("port"),
+        "age_seconds": round(age, 2) if age is not None else None,
+        "stale": stale,
+        "config_keys": sorted((first.get("config") or {}).keys()),
+        "amplification": first.get("amplification"),
+        "dropped_bytes": dropped,
+    }
+
+
+#: What each published state means, in the operator's terms rather than the
+#: implementation's.
+_LIVE_STATE_TEXT = {
+    "waiting_for_client": (
+        "Waiting for the phone",
+        "The app is listening. The phone streams only to a receiver that is "
+        "already running, so there is nothing to hear until it connects - and "
+        "if the phone was started first it will have given up trying.",
+    ),
+    "connected": (
+        "Connected, no audio yet",
+        "The socket is open but no audio has arrived.",
+    ),
+    "streaming": (
+        "Receiving audio",
+        "Audio is arriving.",
+    ),
+    "stalled": (
+        "Stalled",
+        "The connection is open but no audio has arrived recently. Nothing "
+        "is being recorded.",
+    ),
+    "stopped": (
+        "Capture stopped",
+        "The capture process has finished.",
+    ),
+}
+
+
+def live_envelope(document: Optional[dict]) -> list:
+    """The published level trace, as a bounded list of floats in dBFS.
+
+    Returned unclamped: the widget maps dB to height.  Non-numeric entries and
+    NaN are dropped rather than turned into a level, because a NaN reaching a
+    Qt painter produces an undefined bar rather than a missing one.
+    """
+    if not document:
+        return []
+    raw = document.get("envelope")
+    if not isinstance(raw, (list, tuple)):
+        return []
+    values = []
+    for item in raw:
+        try:
+            value = float(item)
+        except (TypeError, ValueError):
+            continue
+        if value != value or value in (float("inf"), float("-inf")):
+            continue
+        values.append(value)
+    return values
+
+
+def level_to_fraction(dbfs: Optional[float],
+                      floor_db: float = LIVE_ENVELOPE_FLOOR_DB) -> float:
+    """Map a level in dBFS to 0..1 for a meter, clamped at both ends.
+
+    A linear map of dB is not used because a 60 dB range is mostly silence;
+    on a linear scale everything below about -40 dBFS would be invisible.  The
+    floor is the same one the analysis reports, so a bar reading "nothing" here
+    means the same thing as a floor reading "nothing" there.
+    """
+    if dbfs is None or dbfs != dbfs:
+        return 0.0
+    if dbfs <= floor_db:
+        return 0.0
+    return max(0.0, min(1.0, (dbfs - floor_db) / -floor_db))
+
+
+def _as_float(value) -> Optional[float]:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if result != result else result
+
+
+# ----------------------------------------------------------------------
 # Waveform
 # ----------------------------------------------------------------------
 @dataclass(frozen=True)

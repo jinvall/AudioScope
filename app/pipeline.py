@@ -113,7 +113,10 @@ class AudioPipeline:
         return self.recorder.stats if self.recorder else None
 
     def enable_analysis(
-        self, lossless: bool = False, history_size: int = 0
+        self,
+        lossless: bool = False,
+        history_size: int = 0,
+        on_result: Optional[Callable] = None,
     ) -> "AnalysisWorker":
         """Attach an analysis worker and return it.
 
@@ -121,13 +124,19 @@ class AudioPipeline:
         that only wants analysis does not have to manage its lifetime.  The
         worker's ``submit`` is non-blocking, so attaching it cannot slow
         capture down (AGENTS.md section 2.3).
+
+        ``on_result`` receives every analysed frame on the worker thread.  The
+        live monitor uses it for its level trace, which is why the trace comes
+        from the same frames the detector consumes rather than from a second,
+        cheaper estimate that could disagree with it.
         """
         from .analysis.worker import AnalysisWorker
 
         if self._analysis is not None:
             return self._analysis
         worker = AnalysisWorker(
-            self.config, lossless=lossless, history_size=history_size
+            self.config, lossless=lossless, history_size=history_size,
+            on_result=on_result,
         )
         worker.spectrogram.column_seconds = (
             self.config.analysis_hop_frames / self.config.sample_rate

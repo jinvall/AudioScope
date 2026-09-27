@@ -8,9 +8,15 @@ This command runs that chain for real, and is what ``./run.sh`` invokes.
 
 Two input modes:
 
-* ``--source device``  - a local input via PortAudio (default)
-* ``--source network`` - a TCP stream from an Android device on port 8090,
-  which also reserves ports 8060-8064 for the session
+* ``--source network`` (default) - a TCP stream from an Android device on port
+  8190, which also reserves ports 8060-8064 for the session
+* ``--source device``  - a local input via PortAudio, deliberately not the
+  default: on the development host that is a host microphone which carries
+  audio only while scrcpy is running
+
+While running, this process publishes live capture state to
+``<output>/live_status.json`` (see :mod:`app.livestatus`) so the review window
+can verify the connection and show the incoming audio.
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ from .audio.network import (
     NetworkSource,
 )
 from .config import AppConfig
+from .livestatus import LiveStatusPublisher
 from .pipeline import AudioPipeline
 
 
@@ -214,12 +221,17 @@ def _drive(config: AppConfig, source, args: argparse.Namespace) -> int:
     print("-" * 60)
     print("Ctrl-C to stop.")
 
+    # Published for the review window, which is a separate process and
+    # otherwise has no way to ask whether the phone is actually sending audio.
+    live = LiveStatusPublisher(args.output, sample_rate=config.sample_rate,
+                               source=source)
+
     pipeline = AudioPipeline(
         config, source, record=not args.no_record, record_directory=args.output
     )
     worker = None
     if not args.no_analysis:
-        worker = pipeline.enable_analysis()
+        worker = pipeline.enable_analysis(on_result=live.on_frame)
         print(f"analysis     : {config.analysis.frame_ms:g} ms frame / "
               f"{config.analysis.hop_ms:g} ms hop "
               f"({config.analysis_frames_per_second:.0f} frames/s)")
@@ -259,6 +271,7 @@ def _drive(config: AppConfig, source, args: argparse.Namespace) -> int:
     try:
         while pipeline.running and not stopping["flag"]:
             time.sleep(0.1)
+            live.publish()
             now = time.monotonic()
             if deadline and now >= deadline:
                 break
@@ -280,6 +293,11 @@ def _drive(config: AppConfig, source, args: argparse.Namespace) -> int:
         # SIGINT can still arrive before the handler above is installed (during
         # imports), so this is the backstop that guarantees a clean shutdown.
         print("\nstopping...")
+
+    # Before stopping, so a reader never sees a stopped pipeline still
+    # claiming to be live; and removed entirely by the caller's finally.
+    live.mark_stopped()
+    live.publish(force=True)
 
     stats = pipeline.stop()
     summary = pipeline.summary()

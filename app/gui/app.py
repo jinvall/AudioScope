@@ -25,6 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="event database to review (default: events.db)",
     )
     parser.add_argument(
+        "--recordings", default=os.environ.get(
+            "AUDIOMICROSCOPE_RECORDINGS", "recordings"),
+        help="directory capture publishes its live status into (default: "
+             "recordings). The Live tab reads it from here.",
+    )
+    parser.add_argument(
         "--events", default=os.environ.get("AUDIOMICROSCOPE_EVENTS", "events"),
         help="event directory tree the capture wrote (default: events). "
              "Separation results are written beside the event they came from, "
@@ -56,7 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
 def run_gui(db_path: str, theme: str = "dark", app=None,
             show_splash: bool = True, source: str = "network",
             port: int = 8190, capture_log: Optional[str] = None,
-            events_root: Optional[str] = None) -> int:
+            events_root: Optional[str] = None,
+            capture_dir: Optional[str] = None) -> int:
     """Open the splash, then the review window on an existing database.
 
     Split out from :func:`main` so the single entry point
@@ -99,7 +106,8 @@ def run_gui(db_path: str, theme: str = "dark", app=None,
 
     try:
         controller = open_controller(
-            db_path, config=config, events_root=events_root
+            db_path, config=config, events_root=events_root,
+            capture_dir=capture_dir,
         )
     except Exception as exc:
         print(f"error: cannot open {db_path}: {exc}", file=sys.stderr)
@@ -190,7 +198,8 @@ def main(argv: Optional[list] = None) -> int:
 
     try:
         controller = open_controller(
-            args.db, config=config, events_root=args.events
+            args.db, config=config, events_root=args.events,
+            capture_dir=args.recordings,
         )
     except Exception as exc:
         print(f"error: cannot open {args.db}: {exc}", file=sys.stderr)

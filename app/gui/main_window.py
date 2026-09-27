@@ -53,11 +53,16 @@ from .widgets import (
     PLAYHEAD_MS,
     EventListWidget,
     FieldPanel,
+    LiveMonitorWidget,
     ReviewBar,
     SeparationPanel,
     SpectrogramWidget,
     WaveformWidget,
 )
+
+
+#: How often the window re-reads the capture process's published status.
+LIVE_CAPTURE_POLL_MS = 400
 
 
 class _SeparationBridge(QObject):
@@ -208,6 +213,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._build_spectrogram_tab(), "Spectrogram")
         self.tabs.addTab(self._build_similar_tab(), "Similar")
         self.tabs.addTab(self._build_separation_tab(), "Separate")
+        self.tabs.addTab(self._build_live_tab(), "Live")
         # The two derived views are built only when opened, so neither the
         # spectrogram nor a similarity scan runs for events nobody inspects.
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -340,6 +346,63 @@ class MainWindow(QMainWindow):
         layout.addWidget(note)
         return area
 
+    def _build_live_tab(self) -> QWidget:
+        """Connection verification and a live level trace for capture.
+
+        Not wrapped in a scroll area, unlike the information tabs: this is a
+        fixed monitor rather than a long document, and a scrollbar here would
+        only hide the level trace below the fold.
+        """
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        self.live_monitor = LiveMonitorWidget(self.theme)
+        layout.addWidget(self.live_monitor, 1)
+        return page
+
+    def _refresh_live(self) -> None:
+        """Poll the published capture status.  Cheap, and never blocks.
+
+        A short file read per tick: the alternative - a socket between the two
+        processes - would make the window a participant in capture, and a
+        window that has to be open for capture to work is a window that can
+        break capture.
+        """
+        from .audioview import summarise_live_status
+
+        try:
+            document = self.controller.read_live_status()
+        except Exception as exc:  # pragma: no cover - defensive
+            document = None
+            detail = f"Could not read capture status: {exc}"
+        else:
+            detail = ""
+        summary = summarise_live_status(document)
+        self.live_monitor.set_summary(summary)
+
+        # The footer, drawn inside the panel: the trace then owns all the
+        # space that is left, at any window size.
+        bits = [f"status file: {self.controller.capture_dir()}"]
+        if document is None:
+            bits.append("capture is not publishing status")
+        elif summary.get("config_keys"):
+            bits.append("sender config keys: "
+                        + ", ".join(summary["config_keys"]))
+        if summary.get("amplification") is not None:
+            bits.append(
+                f"sender asked for {summary['amplification']:g}x amplification; "
+                f"recorded, not applied - apply it at playback"
+            )
+        if summary.get("dropped_bytes"):
+            bits.append(f"sender dropped {summary['dropped_bytes']} byte(s)")
+        if detail:
+            bits.insert(0, detail)
+        bits.append(
+            "read from the capture process's own published status"
+        )
+        self.live_monitor.set_footer("   ·   ".join(bits))
+
     # ------------------------------------------------------------------
     # Separation
     # ------------------------------------------------------------------
@@ -466,6 +529,15 @@ class MainWindow(QMainWindow):
         self._live.setInterval(LIVE_POLL_MS)
         self._live.timeout.connect(self._on_live_tick)
         self._live.start()
+
+        # Capture status. Faster than the event poll, because the question it
+        # answers - is audio arriving now - changes in milliseconds when the
+        # answer changes.
+        self._live_capture = QTimer(self)
+        self._live_capture.setInterval(LIVE_CAPTURE_POLL_MS)
+        self._live_capture.timeout.connect(self._refresh_live)
+        self._live_capture.start()
+        self._refresh_live()
 
     # ------------------------------------------------------------------
     # Data

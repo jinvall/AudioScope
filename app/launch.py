@@ -269,6 +269,9 @@ def _open_gui(args: argparse.Namespace, capture) -> int:
             # The same tree capture was told to write, so separations land
             # beside the events they came from.
             events_root=args.events,
+            # So the window's Live tab reads the status this capture process
+            # is publishing, not a default it happens to share.
+            capture_dir=args.recordings,
             capture_log=(capture.log_path if capture is not None else None),
         )
     finally:

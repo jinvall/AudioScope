@@ -28,7 +28,15 @@ event. `tools/separation_check.py` proves the whole AGENTS.md section 26 chain:
 the separated audio correlates **-0.013** with the input mixture, where a
 filtered copy would be ≈1.0. See `docs/SOURCE_SEPARATION.md` section 17.
 
-**560 tests passing**, stable across repeated runs.
+**The GUI has a Live tab** that verifies the capture connection and monitors
+the incoming audio: state, sender address, bytes and seconds received, the
+wire format, whether the sample rate was *declared* or *assumed*, a level
+meter and a scrolling level trace. The capture process publishes it to
+`<recordings>/live_status.json` and the window polls that, because the two are
+separate processes and the window otherwise cannot ask whether audio is
+arriving right now. Verified against a real phone on 8190.
+
+**602 tests passing**, stable across repeated runs.
 
 ## Port allocation
 
@@ -211,7 +219,16 @@ State the honest version, not the reassuring one.
     cannot import torch at all: the model needs numpy 1.x and transformers 4.28
     to load its own checkpoint. Separation needs both environments, and the
     model's weights are 3.4 GB that are not in the repository.
-15. **The model has never been judged on this project's real audio.** It is
+15. **Only one process can hold port 8190.** The app *is* the listener - the
+    phone streams only to a receiver that is already running, and it gives up
+    after 30 retries and never reconnects - so a second capture, or a
+    verification run, silently takes the stream away and the phone has to be
+    restarted. Worth knowing before diagnosing a "broken" sender.
+16. **The level trace is a level, not a waveform.** It is one RMS value per
+    analysis frame, so it shows when audio arrived and how loud it was; it
+    cannot show the shape of a transient. The spectrogram and event waveform
+    are the tools for that.
+17. **The model has never been judged on this project's real audio.** It is
     proven on synthetic probes and on real captured events, and the output
     provably is not a copy or a filter. Whether it isolates a real whisper, a
     real footstep or a real knock *well* is untested, and the classifier

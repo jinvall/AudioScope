@@ -116,6 +116,7 @@ class ReviewController:
         sample_rate: int = 48000,
         config=None,
         events_root: Optional[str] = None,
+        capture_dir: Optional[str] = None,
     ) -> None:
         from ..config import AppConfig
 
@@ -140,6 +141,12 @@ class ReviewController:
         )
         self._events_root = os.path.abspath(
             events_root or os.path.join(self._project_root, "events")
+        )
+        # Where the capture process publishes live status.  Passed rather than
+        # assumed, for the same reason as the events root: the launcher may
+        # have been told to record somewhere else.
+        self._capture_dir = os.path.abspath(
+            capture_dir or os.path.join(self._project_root, "recordings")
         )
 
     #: Waveform envelope width.  Fixed, so envelope cost does not depend on
@@ -472,6 +479,23 @@ class ReviewController:
             worker.stop()
             self._worker = None
 
+    def read_live_status(self) -> Optional[dict]:
+        """The live capture document, or ``None`` if capture is not publishing.
+
+        Read on every poll rather than cached: this is the one thing in the
+        window that must never be stale, because its whole purpose is to say
+        whether audio is arriving *now*.
+        """
+        from ..livestatus import LIVE_STATUS_FILENAME, read_live_status
+
+        return read_live_status(
+            os.path.join(self._capture_dir, LIVE_STATUS_FILENAME)
+        )
+
+    def capture_dir(self) -> str:
+        """Where the capture process publishes its live status."""
+        return self._capture_dir
+
     # ------------------------------------------------------------------
     # Audio and visualisation - always off the GUI thread
     # ------------------------------------------------------------------
@@ -640,6 +664,7 @@ def open_controller(
     db_path: str = "events.db",
     config=None,
     events_root: Optional[str] = None,
+    capture_dir: Optional[str] = None,
 ) -> ReviewController:
     """Open the database and build a controller.  Raises if the file is absent.
 
@@ -657,4 +682,5 @@ def open_controller(
 
     config = config or AppConfig().validate()
     return ReviewController(database, sample_rate=config.sample_rate,
-                            config=config, events_root=events_root)
+                            config=config, events_root=events_root,
+                            capture_dir=capture_dir)

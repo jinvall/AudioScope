@@ -19,7 +19,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QRect, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QPainter, QPen
 from PyQt5.QtWidgets import (
     QAbstractItemView,
@@ -867,3 +867,187 @@ class SeparationPanel(QWidget):
         self.separate_button.setEnabled(bool(self.query()))
         if has_audio and self._region_seconds is None and not self._use_region:
             self.region_label.setText("Whole event")
+
+
+class LiveMonitorWidget(QWidget):
+    """Connection verification and a live level trace for the capture stream.
+
+    Two things, because an operator needs both.  **Verification** answers "is
+    the phone actually sending me audio, and how is it being interpreted?" -
+    the state, the sender's address, and whether the sample rate was *declared*
+    or *assumed*, since the wire is raw PCM with no header and an assumed rate
+    is otherwise invisible.  **Visual** is the level trace and meter, drawn
+    from the same analysis frames the detector consumes, so the meter cannot
+    disagree with what was measured.
+
+    A thin view: it is handed an already-summarised document from
+    :func:`app.gui.audioview.summarise_live_status` and draws it.  All the
+    judgement about what a state means lives there, where it can be tested
+    without a display.
+    """
+
+    def __init__(self, theme, parent=None):
+        super().__init__(parent)
+        self._theme = theme
+        self._summary: dict = {}
+        self._footer = ""
+        # Enough for the headline, the detail line, the fact block, the meter
+        # and a usable trace with the footer below it.  Sized here rather than
+        # clipped later: the panel has no other content to squeeze, so the tab
+        # simply becomes taller.
+        self.setMinimumHeight(360)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    # ------------------------------------------------------------------
+    def set_summary(self, summary: dict) -> None:
+        """Accept the result of ``summarise_live_status``."""
+        self._summary = summary or {}
+        self.update()
+
+    def set_footer(self, text: str) -> None:
+        """One line of provenance drawn along the bottom of the panel."""
+        self._footer = text or ""
+        self.update()
+
+    def summary(self) -> dict:
+        return self._summary
+
+    # ------------------------------------------------------------------
+    def _colour(self, name: str, fallback: str) -> QColor:
+        return QColor(self._theme.color(name, fallback))
+
+    def paintEvent(self, event):
+        from .audioview import level_to_fraction
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        rect = self.rect()
+        painter.fillRect(rect, self._colour("bg-elev-1", "#161028"))
+
+        summary = self._summary
+        margin = 16
+        y = margin + 4
+
+        # -- the headline: is audio arriving? -------------------------
+        state = (summary.get("state") or "unavailable")
+        colour = self._state_colour(state)
+        painter.setPen(QPen(colour, 1))
+        font = painter.font()
+        font.setPointSize(15)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(margin, y + 18, summary.get("state_text") or state)
+        painter.setFont(painter.font())
+        y += 34
+
+        painter.setPen(self._colour("text-muted", "#9698ab"))
+        font = painter.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+        detail = summary.get("detail") or ""
+        if detail:
+            painter.drawText(margin, y + 12, detail[:150])
+        y += 24
+
+        # -- the facts that make the state trustworthy -----------------
+        left = [
+            f"sender     : {summary.get('address') or 'none'}",
+            f"received   : {summary.get('seconds_received', 0.0):.1f} s"
+            f"  ({int(summary.get('bytes_received') or 0):,} bytes)",
+            f"wire       : {summary.get('wire_format') or 'unknown'}",
+        ]
+        rate = summary.get("wire_rate_hz")
+        origin = summary.get("wire_rate_origin")
+        if origin and origin != "declared":
+            left.append(
+                f"rate       : {rate} Hz ASSUMED - the sender declared nothing"
+            )
+        elif origin:
+            left.append(f"rate       : {rate} Hz (declared by the sender)")
+        age = summary.get("age_seconds")
+        if age is not None:
+            left.append(f"status age : {age:.1f} s")
+        for index, text in enumerate(left):
+            painter.drawText(margin, y + 12 + index * 16, text)
+        y += 16 * len(left) + 10
+
+        # -- the level meter -------------------------------------------
+        right = rect.width() - 210
+        painter.setPen(self._colour("text-muted", "#9698ab"))
+        painter.drawText(right, y + 12, "level")
+        level = summary.get("level_dbfs")
+        peak = summary.get("peak_dbfs")
+        bar = QRect(right, y + 20, 170, 14)
+        painter.fillRect(bar, self._colour("bg-elev-2", "#1e1638"))
+        if level is not None:
+            fraction = level_to_fraction(level)
+            filled = QRect(bar)
+            filled.setWidth(int(bar.width() * fraction))
+            painter.fillRect(filled, colour)
+        painter.setPen(QPen(self._colour("border", "#3d2d61"), 1))
+        painter.drawRect(bar)
+        painter.setPen(self._colour("text-subtle", "#6d7086"))
+        text = "no audio" if level is None else f"{level:.1f} dBFS"
+        if peak is not None:
+            text += f"   peak {peak:.1f}"
+        painter.drawText(right, y + 52, text)
+        y = max(y, y + 46) + 12
+
+        # Well clear of the bottom edge: a text rect flush with the
+        # widget boundary is half-clipped by the tab area behind it.
+        footer_top = rect.height() - 30
+
+        # -- the live trace, filling what is left ----------------------
+        # A floor of zero, not a minimum: in a short tab the space for the
+        # trace is taken from the trace, never from the footer.  Overlapping
+        # them would put the two pieces of text on top of each other, and a
+        # monitor that overlaps its own labels is worse than one that shows
+        # a shorter trace.
+        available = footer_top - y - 8
+        strip = QRect(margin, y, rect.width() - 2 * margin, max(0, available))
+        if available < 12:
+            strip = QRect()
+        painter.fillRect(strip, self._colour("bg-elev-0", "#100c1e"))
+        painter.setPen(QPen(self._colour("border", "#3d2d61"), 1))
+        painter.drawRect(strip)
+
+        envelope = summary.get("envelope") or []
+        if envelope and not strip.isNull():
+            from .audioview import level_to_fraction
+
+            middle = strip.top() + strip.height() / 2.0
+            step = strip.width() / max(1, len(envelope))
+            painter.setPen(QPen(colour, 1))
+            for index, value in enumerate(envelope):
+                height = level_to_fraction(value) * (strip.height() / 2.0 - 1)
+                x = strip.left() + index * step
+                painter.drawLine(
+                    int(x), int(middle - height),
+                    int(max(x, x + step - 1)), int(middle + height),
+                )
+            painter.setPen(QPen(self._colour("border", "#3d2d61"), 1))
+            painter.drawLine(strip.left(), int(middle),
+                             strip.right(), int(middle))
+        elif not strip.isNull():
+            painter.setPen(self._colour("text-subtle", "#6d7086"))
+            painter.drawText(strip, Qt.AlignCenter, "No audio levels yet")
+
+        # Footer last: drawn after the trace so it is never painted over.
+        if self._footer:
+            painter.setPen(self._colour("text-subtle", "#6d7086"))
+            painter.drawText(
+                QRect(margin, footer_top, rect.width() - 2 * margin, 16),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                self._footer[:150],
+            )
+
+        painter.end()
+
+    def _state_colour(self, state: str) -> QColor:
+        if state in ("streaming",):
+            return self._colour("primary", "#12f012")
+        if state in ("stalled", "unavailable"):
+            return self._colour("danger", "#ff4d5e")
+        if state == "stopped":
+            return self._colour("text-subtle", "#6d7086")
+        return self._colour("warning", "#ffb020")
