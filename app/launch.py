@@ -84,6 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="event directory root (default: events)")
     parser.add_argument("--recordings", default=DEFAULT_RECORDINGS,
                         help="continuous recording directory (default: recordings)")
+    parser.add_argument(
+        "--font-scale", type=float,
+        default=float(os.environ.get("AUDIOMICROSCOPE_FONT_SCALE", "1.0")),
+        help="multiply every text size by this (default: 1.0). Also settable "
+             "as AUDIOMICROSCOPE_FONT_SCALE.",
+    )
     parser.add_argument("--theme", choices=("dark", "light"), default="dark",
                         help="interface theme (default: dark)")
     parser.add_argument(
@@ -313,6 +319,9 @@ def _open_gui(args: argparse.Namespace, capture) -> int:
             # So the window's Live tab reads the status this capture process
             # is publishing, not a default it happens to share.
             capture_dir=args.recordings,
+            # Text size, so it can be set from the launcher (or the
+            # environment) without knowing the GUI's own arguments.
+            font_scale=args.font_scale,
             capture_log=(capture.log_path if capture is not None else None),
         )
     finally:

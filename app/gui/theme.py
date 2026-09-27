@@ -181,15 +181,48 @@ def load_theme(mode: str = "dark", theme_dir: Optional[str] = None) -> Theme:
 
 
 # ----------------------------------------------------------------------
-def build_stylesheet(theme: Theme, extra: str = "") -> str:
+#: Base text size, in pixels, before scaling.  Every other text size in the
+#: stylesheet is derived from this one, so text can be made larger for a
+#: particular screen or pair of eyes without editing the stylesheet.
+BASE_FONT_PX = 15
+
+#: The smallest multiplier accepted.  Below 1 the window stops being readable,
+#: which is worse than having no size control at all.
+MIN_FONT_SCALE = 0.8
+
+#: The largest accepted, chosen to stay inside a 1280-wide window before the
+#: two-column inspector has to be scrolled.
+MAX_FONT_SCALE = 2.0
+
+
+def build_stylesheet(theme: Theme, extra: str = "",
+                     font_scale: float = 1.0) -> str:
     """Translate tokens into a Qt stylesheet.
 
     Qt's QSS is a subset of CSS: no custom properties, no flexbox, and the
     selectors differ. Every colour and metric comes from the token set, so the
     theme pack's palette, radii and spacing drive the whole application.
+
+    ``font_scale`` multiplies every text size, so one setting makes the whole
+    application larger or smaller together.  Derived from a single base rather
+    than written out per rule, because sizes that are individually correct but
+    collectively too small are exactly the failure this exists to fix.
     """
     if not theme.available:
         return extra
+
+    try:
+        scale = float(font_scale)
+    except (TypeError, ValueError):
+        scale = 1.0
+    scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, scale))
+
+    def font(px: int) -> int:
+        return max(1, int(round(px * scale)))
+
+    base_px = font(BASE_FONT_PX)
+    heading_px = font(BASE_FONT_PX + 3)
+    title_px = font(BASE_FONT_PX + 6)
 
     c = theme.color
     radius = theme.px("radius-md", 12)
@@ -202,12 +235,12 @@ def build_stylesheet(theme: Theme, extra: str = "") -> str:
     QWidget {{
         background-color: {c('bg', '#0f0a18')};
         color: {c('text', '#f3f3f7')};
-        font-size: 13px;
+        font-size: {base_px}px;
     }}
     QLabel#Muted, QLabel#Subtle {{ color: {c('text-muted', '#c8c9d4')}; }}
     QLabel#Subtle {{ color: {c('text-subtle', '#9698ab')}; }}
-    QLabel#Heading {{ font-size: 15px; font-weight: 600; }}
-    QLabel#Title {{ font-size: 17px; font-weight: 600; }}
+    QLabel#Heading {{ font-size: {heading_px}px; font-weight: 600; }}
+    QLabel#Title {{ font-size: {title_px}px; font-weight: 600; }}
     QFrame#Card {{
         background-color: {c('surface', '#1a1230')};
         border: 1px solid {border};

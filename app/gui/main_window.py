@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         self._pending_audio = None
         self._pending_envelope = None
         self._pending_spectrogram = None
+        self._pending_extract = None
         self._change_marker = controller.change_marker()
         # Separation state.  ``_event_duration`` is the length of the event's
         # own audio, kept separately from ``_duration`` because the transport
@@ -284,6 +285,33 @@ class MainWindow(QMainWindow):
         loop.clicked.connect(lambda checked: self.player.set_loop(checked))
         layout.addWidget(loop)
 
+        # Selecting a region and keeping it.  One toggle arms selection on
+        # both the waveform and the spectrogram, because they show the same
+        # event on the same timeline and a region drawn on one should be
+        # visible on the other.
+        self.select_region_button = QPushButton("Select")
+        self.select_region_button.setCheckable(True)
+        self.select_region_button.setToolTip(
+            "Drag on the waveform or the spectrogram to select a region"
+        )
+        self.select_region_button.toggled.connect(
+            self._on_select_region_toggled
+        )
+        layout.addWidget(self.select_region_button)
+
+        self.extract_button = QPushButton("Extract selection")
+        self.extract_button.setEnabled(False)
+        self.extract_button.setToolTip(
+            "Save the selected region as an event of its own, with its own "
+            "audio, measurements and provenance"
+        )
+        self.extract_button.clicked.connect(self._on_extract_selection)
+        layout.addWidget(self.extract_button)
+
+        self.selection_label = QLabel("")
+        self.selection_label.setObjectName("Muted")
+        layout.addWidget(self.selection_label)
+
         layout.addWidget(QLabel("Volume"))
         volume = QSlider(Qt.Horizontal)
         volume.setRange(0, 100)
@@ -298,6 +326,7 @@ class MainWindow(QMainWindow):
     def _build_spectrogram_tab(self) -> QWidget:
         area, holder, layout = self._scroll_holder()
         self.spectrogram = SpectrogramWidget(self.theme)
+        self.spectrogram.region_changed.connect(self._on_region_changed)
         layout.addWidget(self.spectrogram, 1)
         note = QLabel(
             "Generated on demand for this event only, using the same analysis "
@@ -330,8 +359,12 @@ class MainWindow(QMainWindow):
         self.separation.separate_requested.connect(self._on_separate)
         self.separation.compare_requested.connect(self._on_compare_separation)
         self.separation.save_requested.connect(self._on_save_separation)
+        # The panel's own "Select a region" and the transport's "Select" are
+        # two controls for one state, so both go through the window.  Wiring
+        # them to the views separately left the two disagreeing: using one
+        # armed the waveform while the other still thought it was off.
         self.separation.selection_toggled.connect(
-            self.waveform.set_selection_enabled
+            self._on_select_region_toggled
         )
         layout.addWidget(self.separation, 1)
 
@@ -494,21 +527,153 @@ class MainWindow(QMainWindow):
         self._status(f"Saved to {target}")
 
     def _on_region_changed(self, start_fraction: float, end_fraction: float) -> None:
-        """Turn a dragged region into seconds on the event's own timeline."""
-        if end_fraction - start_fraction < 1e-4 or self._event_duration <= 0:
+        """Turn a dragged region into seconds on the event's own timeline.
+
+        Driven by either the waveform or the spectrogram, and mirrored onto
+        both: they show the same event on the same timeline, so a region drawn
+        on one has to appear on the other or the operator cannot tell which
+        span is selected.
+        """
+        collapsed = (end_fraction - start_fraction < 1e-4)
+        if collapsed or self._event_duration <= 0:
             self._region = None
+        else:
+            self._region = (
+                start_fraction * self._event_duration,
+                end_fraction * self._event_duration,
+            )
+        self._sync_region_views()
+
+    def _sync_region_views(self) -> None:
+        """Push the current region to every view that shows one."""
+        region = self._region
+        for view in (self.waveform, self.spectrogram):
+            if region is None:
+                view.clear_region()
+            else:
+                start = region[0] / self._event_duration \
+                    if self._event_duration else 0.0
+                end = region[1] / self._event_duration \
+                    if self._event_duration else 0.0
+                view.set_region(start, end)
+        self.separation.set_region(*region) if region else \
             self.separation.set_region(None, None)
-            return
-        self._region = (
-            start_fraction * self._event_duration,
-            end_fraction * self._event_duration,
-        )
-        self.separation.set_region(*self._region)
+        if region is None:
+            self.selection_label.setText("")
+            self.extract_button.setEnabled(False)
+        else:
+            self.selection_label.setText(
+                f"selected {region[0]:.2f}-{region[1]:.2f}s "
+                f"({region[1] - region[0]:.2f}s)"
+            )
+            self.extract_button.setEnabled(
+                self._stored is not None and bool(self._stored.audio_path)
+            )
+
+    def _on_select_region_toggled(self, enabled: bool) -> None:
+        """Arm or disarm region selection everywhere, from either control."""
+        self.waveform.set_selection_enabled(enabled)
+        self.spectrogram.set_selection_enabled(enabled)
+        # Reflect the state on the other control, without re-entering this
+        # handler: setChecked only emits on a change, and the guard makes that
+        # impossible regardless.
+        if self.separation.region_button.isChecked() != enabled:
+            self.separation.region_button.blockSignals(True)
+            self.separation.region_button.setChecked(enabled)
+            self.separation.region_button.blockSignals(False)
+            # The panel keeps its own "use this region" flag, which the
+            # blocked signal would otherwise have left stale.
+            self.separation._use_region = bool(enabled)
+        if not enabled:
+            self._clear_region()
 
     def _clear_region(self) -> None:
         self._region = None
-        self.waveform.clear_region()
-        self.separation.set_region(None, None)
+        self._sync_region_views()
+
+    # ------------------------------------------------------------------
+    # Extracting a selected region as its own event
+    # ------------------------------------------------------------------
+    def _on_extract_selection(self) -> None:
+        """Save the selected region as a new event.
+
+        The point of the feature: a long event can contain the sound worth
+        keeping along with a car going past and somebody honking, and the
+        operator should be able to keep just the part they care about without
+        losing the original.
+
+        The extraction re-analyses the selection with the real pipeline, so the
+        result is a proper event - measured, classified and fingerprinted - and
+        not a renamed file.  It runs on a worker thread; the window stays
+        usable while it works.
+        """
+        if self._stored is None or self._region is None:
+            self._status("Select a region first", error=True)
+            return
+        if not self._stored.audio_path:
+            self._status(
+                "This event has no audio to extract from; its fingerprint and "
+                "measurements are still available.",
+                error=True,
+            )
+            return
+        start, end = self._region
+        self._pending_extract = self.controller.begin_extract_selection(
+            self._stored, start, end
+        )
+        self.extract_button.setEnabled(False)
+        self._status(
+            f"Extracting {start:.2f}-{end:.2f}s as a new event... "
+            f"analysing it takes a moment."
+        )
+        QTimer.singleShot(200, self._pump_extract)
+
+    def _pump_extract(self) -> None:
+        pending = self._pending_extract
+        if pending is None:
+            return
+        if not pending.done:
+            QTimer.singleShot(200, self._pump_extract)
+            return
+        self._pending_extract = None
+        if pending.error:
+            self._status(f"Extraction failed: {pending.error}", error=True)
+            self._sync_region_views()
+            return
+        result = pending.result
+        if result is None or not result.ok:
+            self._status("Extraction produced nothing", error=True)
+            self._sync_region_views()
+            return
+        self.refresh()
+        stored, description = self.controller.select(
+            result.stored_events[0])
+        if stored is not None:
+            self._stored = stored
+            self._description = description
+            self._fill_panels(description)
+            self.review_bar.load(stored)
+            self.waveform.clear()
+            self.spectrogram.clear()
+            self._event_duration = 0.0
+            self._duration = 0.0
+            self._playback_source = "original"
+            self._clear_region()
+            self._set_transport_enabled(False)
+            self._pending_audio = self.controller.begin_audio(stored)
+            self._pump_pending()
+        note = ""
+        if result.stored_without_detection:
+            note = (
+                "  The detector did not fire on the selection, so it is "
+                "stored as given: audio, duration and level, with no "
+                "classification and no fingerprint."
+            )
+        self._status(
+            f"Saved {result.stored_events[0]} from "
+            f"{result.parent_event_id} "
+            f"({result.duration_seconds:.2f}s).{note}"
+        )
 
     # ------------------------------------------------------------------
     def _install_actions(self) -> None:

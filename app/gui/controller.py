@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -52,6 +52,8 @@ class Pending:
     samples: Optional[np.ndarray] = None
     envelope: Optional[Envelope] = None
     spectrogram: Optional[Spectrogram] = None
+    # The SegmentResult of an extraction, once it has one.
+    result: Optional[Any] = None
     error: Optional[str] = None
     error_kind: Optional[str] = None  # "missing" | "corrupt"
     token: int = 0                   # guards against out-of-order results
@@ -478,6 +480,46 @@ class ReviewController:
         if worker is not None:
             worker.stop()
             self._worker = None
+
+    def begin_extract_selection(
+        self, stored: StoredEvent, start_seconds: float, end_seconds: float
+    ) -> Pending:
+        """Queue the extraction of a selected region as its own event.
+
+        Off the GUI thread, and for the same reason as every other piece of
+        work here: the selection is re-analysed by the real pipeline, which
+        costs real CPU, and a review window that freezes is unusable.
+        """
+        pending = Pending(
+            kind="extract_selection", event_id=stored.event_id,
+            token=self._next_token(),
+        )
+
+        def work() -> None:
+            try:
+                from ..events.segment import extract_selection
+
+                result = extract_selection(
+                    self.config,
+                    parent_event_id=stored.event_id,
+                    parent_audio_path=stored.audio_path,
+                    start_seconds=float(start_seconds),
+                    end_seconds=float(end_seconds),
+                    event_root=self._events_root,
+                    database_path=self.db.path,
+                    on_progress=lambda text: setattr(
+                        pending, "error_kind", text
+                    ),
+                )
+                pending.result = result
+                if not result.ok:
+                    pending.error = result.error or "nothing was stored"
+            except Exception as exc:
+                pending.error = f"{type(exc).__name__}: {exc}"
+            finally:
+                pending.done = True
+
+        return _dispatch(work, pending)
 
     def read_live_status(self) -> Optional[dict]:
         """The live capture document, or ``None`` if capture is not publishing.

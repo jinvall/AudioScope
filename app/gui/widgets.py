@@ -269,11 +269,20 @@ class WaveformWidget(QWidget):
 
 
 class SpectrogramWidget(QWidget):
-    """Optional, lazily built event spectrogram.
+    """Optional, lazily built event spectrogram, with region selection.
 
     Colours come from the theme pack's own spectral ramp, so the display matches
     the design system's intent rather than an arbitrary colormap.
+
+    Region selection works exactly as it does on the waveform, and for the same
+    reason: the spectrogram is where a short transient inside a long event is
+    easiest to find, so it has to be possible to point at one there.  Both views
+    address the same event timeline, so a region drawn on either means the same
+    span of audio.
     """
+
+    #: A region was dragged, as two fractions of the event's length.
+    region_changed = pyqtSignal(float, float)
 
     def __init__(self, theme, parent=None):
         super().__init__(parent)
@@ -284,6 +293,76 @@ class SpectrogramWidget(QWidget):
         self.setMinimumHeight(150)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._lut = ramp_lut(theme.spectral_ramp())
+        self._selection_enabled = False
+        self._selecting = False
+        self._anchor = 0.0
+        self._region: Optional[tuple] = None
+
+    # ------------------------------------------------------------------
+    # Region selection
+    # ------------------------------------------------------------------
+    def set_selection_enabled(self, enabled: bool) -> None:
+        self._selection_enabled = bool(enabled)
+        if not enabled:
+            self._selecting = False
+        self.setCursor(
+            Qt.CrossCursor if enabled else Qt.PointingHandCursor
+        )
+        self.update()
+
+    @property
+    def selection_enabled(self) -> bool:
+        return self._selection_enabled
+
+    def set_region(self, start: float, end: float) -> None:
+        if end - start < 1e-4:
+            self.clear_region()
+            return
+        self._region = (max(0.0, min(1.0, start)), max(0.0, min(1.0, end)))
+        self.update()
+
+    def clear_region(self) -> None:
+        self._region = None
+        self._selecting = False
+        self.update()
+
+    def region(self) -> Optional[tuple]:
+        return self._region
+
+    def _fraction_at(self, x: int) -> float:
+        return max(0.0, min(1.0, x / max(1, self.width())))
+
+    def mousePressEvent(self, event):
+        if self._image is None:
+            return
+        fraction = self._fraction_at(int(event.position().x()))
+        if self._selection_enabled and event.button() == Qt.LeftButton:
+            self._selecting = True
+            self._anchor = fraction
+            self._region = (fraction, fraction)
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if not self._selecting:
+            return
+        self._selecting = False
+        end = self._fraction_at(int(event.position().x()))
+        start, end = sorted((self._anchor, end))
+        if end - start < 1e-4:
+            self._region = None
+            self.region_changed.emit(0.0, 0.0)
+        else:
+            self._region = (start, end)
+            self.region_changed.emit(start, end)
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        if self._image is None or not self._selecting:
+            return
+        start, end = sorted((self._anchor, self._fraction_at(
+            int(event.position().x()))))
+        self._region = (start, end)
+        self.update()
 
     def set_spectrogram(self, spectrogram) -> None:
         if spectrogram is None or spectrogram.data.size == 0:
@@ -325,6 +404,19 @@ class SpectrogramWidget(QWidget):
             painter.drawText(
                 6, 14, f"0 - {self._max_hz / 1000:.1f} kHz"
             )
+        # The selected region, so it reads the same way it does on the
+        # waveform: the same span, on the same timeline, in both views.
+        if self._region is not None:
+            start, end = self._region
+            x0 = int(start * rect.width())
+            x1 = int(end * rect.width())
+            border = QColor(self._theme.color("primary", "#12f012"))
+            fill = QColor(border)
+            fill.setAlpha(64 if self._selecting else 40)
+            painter.fillRect(x0, 0, max(1, x1 - x0), rect.height(), fill)
+            painter.setPen(QPen(border, 2))
+            painter.drawLine(x0, 0, x0, rect.height())
+            painter.drawLine(x1, 0, x1, rect.height())
 
 
 #: Default columns.  Compact on purpose; the wider set is opt-in.
@@ -926,28 +1018,44 @@ class LiveMonitorWidget(QWidget):
 
         summary = self._summary
         margin = 16
+        base = painter.font()
+        # Sizes derived from the application's font, not hardcoded.  In
+        # *pixels*: the stylesheet sets font-size in px, which leaves
+        # pointSize() at -1, so anything derived from points collapses to its
+        # floor and this panel stays small no matter what the user asks for.
+        if base.pixelSize() > 0:
+            base_px = base.pixelSize()
+        elif base.pointSize() > 0:
+            base_px = int(round(base.pointSize() * 96.0 / 72.0))
+        else:
+            base_px = 15
+        headline_px = base_px + 6
+        body_px = max(12, base_px - 2)
+        line = int(round(body_px * 1.45))
+
         y = margin + 4
 
         # -- the headline: is audio arriving? -------------------------
         state = (summary.get("state") or "unavailable")
         colour = self._state_colour(state)
         painter.setPen(QPen(colour, 1))
-        font = painter.font()
-        font.setPointSize(15)
+        font = base
+        font.setPixelSize(headline_px)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(margin, y + 18, summary.get("state_text") or state)
-        painter.setFont(painter.font())
-        y += 34
+        painter.drawText(margin, y + headline_px,
+                         summary.get("state_text") or state)
+        painter.setFont(base)
+        y += headline_px + 10
 
         painter.setPen(self._colour("text-muted", "#9698ab"))
-        font = painter.font()
-        font.setPointSize(9)
+        font = base
+        font.setPixelSize(body_px)
         painter.setFont(font)
         detail = summary.get("detail") or ""
         if detail:
-            painter.drawText(margin, y + 12, detail[:150])
-        y += 24
+            painter.drawText(margin, y + body_px, detail[:150])
+        y += body_px + 8
 
         # -- the facts that make the state trustworthy -----------------
         left = [
@@ -968,8 +1076,8 @@ class LiveMonitorWidget(QWidget):
         if age is not None:
             left.append(f"status age : {age:.1f} s")
         for index, text in enumerate(left):
-            painter.drawText(margin, y + 12 + index * 16, text)
-        y += 16 * len(left) + 10
+            painter.drawText(margin, y + body_px + index * line, text)
+        y += line * len(left) + 8
 
         # -- the level meter -------------------------------------------
         right = rect.width() - 210
@@ -977,7 +1085,7 @@ class LiveMonitorWidget(QWidget):
         painter.drawText(right, y + 12, "level")
         level = summary.get("level_dbfs")
         peak = summary.get("peak_dbfs")
-        bar = QRect(right, y + 20, 170, 14)
+        bar = QRect(right, y + body_px + 6, 170, max(14, body_px))
         painter.fillRect(bar, self._colour("bg-elev-2", "#1e1638"))
         if level is not None:
             fraction = level_to_fraction(level)
@@ -990,8 +1098,8 @@ class LiveMonitorWidget(QWidget):
         text = "no audio" if level is None else f"{level:.1f} dBFS"
         if peak is not None:
             text += f"   peak {peak:.1f}"
-        painter.drawText(right, y + 52, text)
-        y = max(y, y + 46) + 12
+        painter.drawText(right, y + body_px + 18 + body_px, text)
+        y += body_px * 2 + 22
 
         # Well clear of the bottom edge: a text rect flush with the
         # widget boundary is half-clipped by the tab area behind it.

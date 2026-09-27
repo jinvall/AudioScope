@@ -41,6 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="theme flavour from the design system (default: dark)",
     )
     parser.add_argument(
+        "--font-scale", type=float,
+        default=float(os.environ.get("AUDIOMICROSCOPE_FONT_SCALE", "1.0")),
+        help="multiply every text size by this. 1.0 is the default size, which "
+             "is already larger than earlier versions; 1.3 is a comfortable "
+             "size on a large or high-DPI screen, and 1.5 is large. Clamped to "
+             f"{{0.8..2.0}}. Also settable as AUDIOMICROSCOPE_FONT_SCALE.",
+    )
+    parser.add_argument(
         "--theme-dir", default=None,
         help="override the theme pack directory (for testing)",
     )
@@ -52,10 +60,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=8190,
         help="port shown on the splash (default: 8190)",
     )
-    parser.add_argument(
-        "--recordings", default="recordings",
-        help="continuous recording directory, where the capture log lives",
-    )
     return parser
 
 
@@ -63,7 +67,8 @@ def run_gui(db_path: str, theme: str = "dark", app=None,
             show_splash: bool = True, source: str = "network",
             port: int = 8190, capture_log: Optional[str] = None,
             events_root: Optional[str] = None,
-            capture_dir: Optional[str] = None) -> int:
+            capture_dir: Optional[str] = None,
+            font_scale: float = 1.0) -> int:
     """Open the splash, then the review window on an existing database.
 
     Split out from :func:`main` so the single entry point
@@ -102,7 +107,8 @@ def run_gui(db_path: str, theme: str = "dark", app=None,
 
     application = app or QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("Audio Microscope")
-    application.setStyleSheet(build_stylesheet(resolved))
+    application.setStyleSheet(
+        build_stylesheet(resolved, font_scale=font_scale))
 
     try:
         controller = open_controller(
@@ -191,7 +197,8 @@ def main(argv: Optional[list] = None) -> int:
 
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("Audio Microscope")
-    application.setStyleSheet(build_stylesheet(theme))
+    application.setStyleSheet(
+        build_stylesheet(theme, font_scale=args.font_scale))
 
     from .controller import open_controller
     from .main_window import MainWindow
@@ -227,7 +234,8 @@ def launch(argv: Optional[list] = None, offscreen: bool = False):
 
     config = AppConfig().validate()
     theme = load_theme("dark")
-    application.setStyleSheet(build_stylesheet(theme))
+    application.setStyleSheet(
+        build_stylesheet(theme, font_scale=args.font_scale))
 
     from .controller import open_controller
     from .main_window import MainWindow

@@ -395,3 +395,91 @@ for and are governed with the audio they belong to. Continuous recordings
 * A file larger than the whole budget cannot be made to fit. It is stored
   anyway and the overage reported, because the alternative is silently
   discarding the newest event's audio.
+
+---
+
+# 15. Event Derivation: Extracting a Selection as an Event
+
+An event is a span the detector chose, and on a continuous scene that span can
+contain the sound worth keeping together with a car going past and somebody
+honking. The operator can hear the click and point at it, but the event they
+have to review is the whole forty seconds.
+
+So a region selected on the waveform or the spectrogram can be extracted as an
+event of its own. **The parent is never modified.**
+
+## 15.1 What is created
+
+A new event, with:
+
+* its own `original.wav`, containing **exactly** the selected audio;
+* its own duration, level and provenance;
+* its own classification and fingerprint, when the detector fires inside the
+  selection;
+* a `derivation` block in `metadata.json` recording the parent event id, the
+  selected span in the parent's timeline, and - when the detector found
+  something narrower - where inside the selection it actually was.
+
+```json
+"derivation": {
+  "derived_from_event_id": "event_000042",
+  "selection_start_seconds": 8.0,
+  "selection_end_seconds": 9.5,
+  "found_start_seconds": null,
+  "found_end_seconds": null
+}
+```
+
+A null `derived_from_event_id` means the event was detected from the live
+stream, which is the normal case. "Is this a real detection or a piece of one"
+is answerable from the record alone.
+
+## 15.2 Why the selection is re-analysed
+
+Cutting the audio and writing it out would be quick, and would produce a file
+with a name rather than an event: no fingerprint, no classification, no
+measurements. The selection is a short recording in its own right, so it goes
+through the same analysis, detection, classification and fingerprinting as
+anything else - the real pipeline, from a file, exactly as
+`python -m app.test` does.
+
+Three things were tried and rejected, each for a reason worth recording:
+
+* **Pre-roll and post-roll of the configured 5 s.** Applying the stream's
+  context to a selection appended seconds the operator did not ask for. The
+  selection *is* the event, so extraction uses zero roll.
+* **Analysing a wider context around the selection**, so the adaptive noise
+  floor would have history. The detector merges a continuous neighbourhood
+  into one long event - the known behaviour of a deliberately broad detector -
+  so a selection came back containing the very traffic the operator was
+  excluding.
+* **Taking the first detection in the window.** A window that starts
+  mid-stream begins with no floor history, so its first frames look like an
+  onset against an unestablished floor. The detector reliably fired on the
+  window's own edge. Detections within `BOUNDARY_GUARD_SECONDS` (0.1 s) of
+  the start are therefore ignored - they are an artefact of the cut, not a
+  sound, and a genuine onset there could not have been pointed at precisely
+  anyway.
+
+## 15.3 When the detector finds nothing
+
+A single click is tens of milliseconds and often below the detector's
+thresholds. In that case the selection is **still saved**: the audio, the
+duration, the level and the provenance are all facts and are recorded. There
+is no classification and no fingerprint, because none was measured.
+
+This is the one case that decides the design. The alternative - dropping a
+selection the detector did not recognise - would lose the very thing the
+operator pointed at, which is the only outcome the feature exists to prevent.
+
+The consequence is stated rather than hidden: an extracted click may have no
+fingerprint, and so will not appear in similarity search or in the Similar tab.
+
+## 15.4 Event ids
+
+`EventStore` scans the event tree on construction and continues numbering past
+whatever is there, rather than starting at zero. Starting at zero was a silent
+data-loss bug: a second session in the same day allocated `event_000000` again
+and overwrote the earlier session's first event, audio and all. It was found
+by extraction, which re-analyses a selection through a second store and was
+writing over the very event it was extracting from.

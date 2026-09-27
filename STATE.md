@@ -28,6 +28,13 @@ event. `tools/separation_check.py` proves the whole AGENTS.md section 26 chain:
 the separated audio correlates **-0.013** with the input mixture, where a
 filtered copy would be ≈1.0. See `docs/SOURCE_SEPARATION.md` section 17.
 
+**A selected region of an event can be extracted as an event of its own.**
+Drag on the waveform or the spectrogram, then "Extract selection": the
+selection becomes a new event with its own audio, measurements and provenance,
+and the parent is never modified. This is for the case where one long event
+holds the sound worth keeping together with a car going past and somebody
+honking. See `docs/DATA_AND_STORAGE.md` section 15.
+
 **The GUI has a Live tab** that verifies the capture connection and monitors
 the incoming audio: state, sender address, bytes and seconds received, the
 wire format, whether the sample rate was *declared* or *assumed*, a level
@@ -36,7 +43,7 @@ meter and a scrolling level trace. The capture process publishes it to
 separate processes and the window otherwise cannot ask whether audio is
 arriving right now. Verified against a real phone on 8190.
 
-**602 tests passing**, stable across repeated runs.
+**624 tests passing**, stable across repeated runs.
 
 ## Port allocation
 
@@ -224,11 +231,17 @@ State the honest version, not the reassuring one.
     after 30 retries and never reconnects - so a second capture, or a
     verification run, silently takes the stream away and the phone has to be
     restarted. Worth knowing before diagnosing a "broken" sender.
-16. **The level trace is a level, not a waveform.** It is one RMS value per
+16. **An extracted selection is not always classified.** The selection is
+    re-analysed, and a short quiet transient - a single click is tens of
+    milliseconds - does not always trip the detector. The audio is saved
+    either way, with the duration, level and provenance, and the record says
+    no classification was measured rather than inventing one. So an extracted
+    click may have no fingerprint and will not appear in similarity search.
+17. **The level trace is a level, not a waveform.** It is one RMS value per
     analysis frame, so it shows when audio arrived and how loud it was; it
     cannot show the shape of a transient. The spectrogram and event waveform
     are the tools for that.
-17. **The model has never been judged on this project's real audio.** It is
+18. **The model has never been judged on this project's real audio.** It is
     proven on synthetic probes and on real captured events, and the output
     provably is not a copy or a filter. Whether it isolates a real whisper, a
     real footstep or a real knock *well* is untested, and the classifier

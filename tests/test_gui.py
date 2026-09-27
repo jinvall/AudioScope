@@ -980,3 +980,77 @@ def test_capture_cli_defaults_to_the_network_source():
     assert args.port == 8190
     # The local input stays available, just not by default.
     assert build_parser().parse_args(["--source", "device"]).source == "device"
+
+
+# ======================================================================
+# Selecting a region and extracting it as its own event
+# ======================================================================
+def test_the_window_exposes_region_selection_and_extraction(app_qt, controller):
+    """The controls must exist and be wired, not merely implemented.
+
+    The feature is only useful if the operator can reach it: a Select toggle
+    on the transport, a region on both views, and an Extract button that
+    enables only once a region exists.
+    """
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        assert window.extract_button is not None
+        assert window.extract_button.isEnabled() is False
+        # Selection starts disarmed, so a click still seeks.
+        assert window.waveform.selection_enabled is False
+        assert window.spectrogram.selection_enabled is False
+
+        window._on_select_region_toggled(True)
+        assert window.waveform.selection_enabled is True
+        assert window.spectrogram.selection_enabled is True
+        # The separation panel shares the same toggle.
+        assert window.separation._use_region is True
+
+        # With no event loaded there is no timeline to measure a region on.
+        window._event_duration = 0.0
+        window._on_region_changed(0.25, 0.75)
+        assert window._region is None
+
+        window._event_duration = 8.0
+        window._on_region_changed(0.25, 0.75)
+        assert window._region == (2.0, 6.0)
+        # Both views show it, and the label says what was selected.
+        assert window.waveform.region() == (0.25, 0.75)
+        assert window.spectrogram.region() == (0.25, 0.75)
+        assert "2.00-6.00s" in window.selection_label.text()
+
+        # A collapsed drag clears everything.
+        window._on_region_changed(0.0, 0.0)
+        assert window._region is None
+        assert window.waveform.region() is None
+        assert window.extract_button.isEnabled() is False
+    finally:
+        window.close()
+        controller.db.close()
+
+
+def test_extraction_without_audio_is_refused(app_qt, controller, populated):
+    """An event whose audio was evicted cannot be extracted, and says so."""
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        # A row with no audio: the fingerprint is still there.
+        event_id = populated.list_events()[0].event_id
+        populated.set_audio_path(event_id, None)
+        populated.set_audio_state(event_id, available=False)
+        window.select_event(event_id)
+        window._event_duration = 2.0
+        window._on_region_changed(0.1, 0.9)
+        window._on_extract_selection()
+        message = window.status_label.text()
+        assert "no audio" in message.lower()
+        # Nothing was queued, because there was nothing to do.
+        assert window._pending_extract is None
+    finally:
+        window.close()
+        controller.db.close()
