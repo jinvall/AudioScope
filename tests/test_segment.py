@@ -14,7 +14,7 @@ import os
 import numpy as np
 import pytest
 
-from app.audio.wavio import read_wav, write_wav_atomic
+from app.audio.wavio import read_wav
 from app.config import AppConfig
 from app.events.database import EventDatabase
 from app.events.event import Event
