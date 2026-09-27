@@ -962,3 +962,21 @@ def test_the_model_is_found_regardless_of_the_events_root(tmp_path):
     assert os.path.isdir(
         os.path.join(controller._project_root, "third_party", "AudioSep")
     )
+
+
+def test_capture_cli_defaults_to_the_network_source():
+    """Same reasoning as the launcher: the phone on 8190, not the mic.
+
+    `app.capture` was left defaulting to `device` after the launcher had
+    already been corrected.  On this machine `--source device` resolves to
+    the HDA Intel PCH ALC897 analog path, which only carries audio while
+    scrcpy is running - so a bare `python -m app.capture` recorded silence
+    and reported it as a quiet environment.
+    """
+    from app.capture import build_parser
+
+    args = build_parser().parse_args([])
+    assert args.source == "network"
+    assert args.port == 8190
+    # The local input stays available, just not by default.
+    assert build_parser().parse_args(["--source", "device"]).source == "device"

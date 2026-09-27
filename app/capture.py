@@ -42,8 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Live audio capture -> ring buffer -> WAV recording.",
     )
     parser.add_argument(
-        "-s", "--source", choices=("device", "network"), default="device",
-        help="where the audio comes from (default: device)",
+        "-s", "--source", choices=("device", "network"), default="network",
+        help="where the audio comes from. Defaults to network - the phone on "
+             f"port {STREAM_PORT} - because that is this project's source. The "
+             "local input is a host microphone, which on this machine is the "
+             "HDA Intel PCH ALC897 analog path and carries audio only while "
+             "scrcpy is running; with nothing playing it delivers silence, and "
+             "a capture that silently records nothing looks like a quiet room. "
+             "Use --source device deliberately, not by default.",
     )
     parser.add_argument(
         "-d", "--device", default=None,
