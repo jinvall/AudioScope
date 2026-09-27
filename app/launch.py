@@ -32,6 +32,8 @@ DEFAULT_DB = os.environ.get("AUDIOMICROSCOPE_DB", "events.db")
 DEFAULT_EVENTS = "events"
 DEFAULT_RECORDINGS = "recordings"
 
+from .livestatus import LIVE_STATUS_FILENAME  # noqa: E402  (after defaults)
+
 
 def project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -128,10 +130,35 @@ class CaptureProcess:
             cmd += ["--seconds", str(self.args.seconds)]
         return cmd
 
+    @property
+    def live_status_path(self) -> str:
+        return os.path.join(self.args.recordings, LIVE_STATUS_FILENAME)
+
+    def published_live_status(self, wait_seconds: float = 3.0) -> bool:
+        """Whether the capture process is really running and publishing.
+
+        A stale document from a previous session is removed before capture is
+        spawned, so this cannot be fooled by yesterday's file: the only way one
+        exists here is that this capture wrote it.
+        """
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        while True:
+            if os.path.exists(self.live_status_path):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.2)
+
     def start(self) -> bool:
         if self.process is not None:
             return True
         os.makedirs(self.args.recordings, exist_ok=True)
+        # Remove a stale document first, so "capture is publishing" cannot be
+        # reported by a file the previous session left behind.
+        try:
+            os.remove(self.live_status_path)
+        except OSError:
+            pass
         # Capture's own output would fight the GUI's for the terminal, and it is
         # long-running, so it goes to a log the user can read afterwards.
         self.log_path = os.path.join(
@@ -203,6 +230,20 @@ def main(argv: Optional[list] = None) -> int:
             # Give the port reservation and device open a moment, so the review
             # window opens onto a database that is already being written.
             time.sleep(1.5)
+            # "started" so far only means the process was spawned.  The child
+            # can still die immediately - a port already in use is the common
+            # case, and the launcher used to report success and open a window
+            # that would never see audio.  The live status file is the honest
+            # signal: the capture process only writes it once it is really
+            # running, so its absence means there is no capture.
+            if not capture.published_live_status():
+                _say(
+                    f"WARNING: capture did not come up. Nothing will be "
+                    f"recorded until it does. Most often the stream port "
+                    f"{args.port} is already in use by another instance or "
+                    f"another listener. The Live tab in the review window says "
+                    f"the same thing, and the reason is in the capture log."
+                )
         else:
             capture = None
     else:
