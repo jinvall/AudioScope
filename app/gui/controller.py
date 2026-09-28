@@ -391,7 +391,14 @@ class ReviewController:
         attempts = []
         for name in store.list_attempts(directory):
             path = os.path.join(directory, name)
-            metadata = store.read_metadata(path) or {}
+            metadata = store.read_metadata(path)
+            if not metadata:
+                # The attempt directory is created when the job starts and gets
+                # its metadata when it finishes, so a directory with no
+                # metadata is a job *in progress*.  Listing it as an attempt
+                # showed a row with no query and no status, which reads as a
+                # failure rather than as work happening.
+                continue
             attempts.append(
                 SeparationAttempt(
                     name=name,

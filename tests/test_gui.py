@@ -1054,3 +1054,140 @@ def test_extraction_without_audio_is_refused(app_qt, controller, populated):
     finally:
         window.close()
         controller.db.close()
+
+
+# ======================================================================
+# Real mouse interaction
+# ======================================================================
+@pytest.fixture
+def theme():
+    from app.gui.theme import load_theme
+
+    return load_theme("dark")
+
+
+def _drag(widget, from_fraction, to_fraction):
+    """A real press-move-release across the widget, as a hand would do it."""
+    from PyQt5.QtCore import Qt, QPoint
+    from PyQt5.QtTest import QTest
+
+    y = widget.height() // 2
+    QTest.mousePress(
+        widget, Qt.LeftButton,
+        pos=QPoint(int(from_fraction * widget.width()), y))
+    QTest.mouseMove(
+        widget, QPoint(int(to_fraction * widget.width()), y))
+    QTest.mouseRelease(
+        widget, Qt.LeftButton,
+        pos=QPoint(int(to_fraction * widget.width()), y))
+
+
+def test_a_real_mouse_drag_selects_a_region(app_qt, theme):
+    """Selection has to work with an actual mouse, not just a method call.
+
+    Every mouse handler once used ``QMouseEvent.position()``, which is Qt 6.
+    This is PyQt5, where it is ``pos()``; Qt swallowed the AttributeError, so
+    a drag did nothing at all and no error was raised anywhere. Calling the
+    handler directly cannot catch that, so the drag is performed here.
+    """
+    from PyQt5.QtWidgets import QApplication
+    from app.gui.audioview import Envelope
+    from app.gui.widgets import WaveformWidget
+
+    import numpy as np
+
+    application = QApplication.instance()
+    widget = WaveformWidget(theme)
+    t = np.linspace(0, 1, 4000)
+    signal = (0.4 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    widget.set_envelope(Envelope(
+        peaks=np.abs(signal[::10]).astype(np.float32),
+        troughs=-np.abs(signal[::10]).astype(np.float32),
+        sample_rate=48000, samples=signal.size, peak=0.4,
+    ))
+    widget.resize(800, 200)
+    widget.show()
+    application.processEvents()
+
+    seen = []
+    widget.region_changed.connect(lambda a, b: seen.append((a, b)))
+
+    # Unarmed, a drag must not select: a click still seeks.
+    widget.set_selection_enabled(False)
+    _drag(widget, 0.25, 0.75)
+    application.processEvents()
+    assert widget.region() is None
+
+    widget.set_selection_enabled(True)
+    _drag(widget, 0.25, 0.75)
+    application.processEvents()
+    assert widget.region() is not None, "the drag selected nothing"
+    start, end = widget.region()
+    assert abs(start - 0.25) < 0.02 and abs(end - 0.75) < 0.02
+    assert seen == [(start, end)]
+
+    # A bare click clears the selection rather than leaving a stale region.
+    _drag(widget, 0.5, 0.5)
+    application.processEvents()
+    assert widget.region() is None
+    widget.close()
+
+
+def test_the_spectrogram_selects_by_mouse_too(app_qt, theme):
+    from PyQt5.QtWidgets import QApplication
+    from app.gui.audioview import Spectrogram
+    from app.gui.widgets import SpectrogramWidget
+
+    import numpy as np
+
+    application = QApplication.instance()
+    widget = SpectrogramWidget(theme)
+    widget.set_spectrogram(Spectrogram(
+        data=np.random.default_rng(5).random((64, 200)).astype(np.float32),
+        frequencies=np.linspace(0.0, 8000.0, 64),
+        sample_rate=48000, max_hz=8000.0,
+    ))
+    widget.resize(800, 200)
+    widget.show()
+    application.processEvents()
+
+    widget.set_selection_enabled(True)
+    _drag(widget, 0.2, 0.6)
+    application.processEvents()
+    assert widget.region() is not None
+    start, end = widget.region()
+    assert abs(start - 0.2) < 0.02 and abs(end - 0.6) < 0.02
+    widget.close()
+
+
+def test_a_click_seeks_with_a_real_mouse(app_qt, theme):
+    """Click-to-seek shares the same handler, and had the same bug."""
+    from PyQt5.QtCore import Qt, QPoint
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
+    from app.gui.audioview import Envelope
+    from app.gui.widgets import WaveformWidget
+
+    import numpy as np
+
+    application = QApplication.instance()
+    widget = WaveformWidget(theme)
+    t = np.linspace(0, 1, 4000)
+    signal = (0.4 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    widget.set_envelope(Envelope(
+        peaks=np.abs(signal[::10]).astype(np.float32),
+        troughs=-np.abs(signal[::10]).astype(np.float32),
+        sample_rate=48000, samples=signal.size, peak=0.4,
+    ))
+    widget.resize(800, 200)
+    widget.show()
+    application.processEvents()
+
+    seeks = []
+    widget.seek_requested.connect(seeks.append)
+    QTest.mouseClick(widget, Qt.LeftButton,
+                     pos=QPoint(400, widget.height() // 2))
+    application.processEvents()
+    assert seeks, "a click produced no seek"
+    assert abs(seeks[-1] - 0.5) < 0.02
+    widget.close()

@@ -184,15 +184,29 @@ def load_theme(mode: str = "dark", theme_dir: Optional[str] = None) -> Theme:
 #: Base text size, in pixels, before scaling.  Every other text size in the
 #: stylesheet is derived from this one, so text can be made larger for a
 #: particular screen or pair of eyes without editing the stylesheet.
-BASE_FONT_PX = 15
+BASE_FONT_PX = 17
 
 #: The smallest multiplier accepted.  Below 1 the window stops being readable,
 #: which is worse than having no size control at all.
-MIN_FONT_SCALE = 0.8
+MIN_FONT_SCALE = 0.7
 
 #: The largest accepted, chosen to stay inside a 1280-wide window before the
 #: two-column inspector has to be scrolled.
-MAX_FONT_SCALE = 2.0
+MAX_FONT_SCALE = 2.5
+
+
+def scaled_base_px(font_scale: float = 1.0) -> int:
+    """The base text size in pixels at a given scale.
+
+    Exposed so a running window can report and re-derive the size without
+    re-parsing a stylesheet.
+    """
+    try:
+        scale = float(font_scale)
+    except (TypeError, ValueError):
+        scale = 1.0
+    scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, scale))
+    return max(1, int(round(BASE_FONT_PX * scale)))
 
 
 def build_stylesheet(theme: Theme, extra: str = "",

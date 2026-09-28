@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         self._pending_envelope = None
         self._pending_spectrogram = None
         self._pending_extract = None
+        self._font_scale = 1.0
         self._change_marker = controller.change_marker()
         # Separation state.  ``_event_duration`` is the length of the event's
         # own audio, kept separately from ``_duration`` because the transport
@@ -117,7 +118,12 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Audio Microscope")
         self.resize(1280, 820)
+        # Wider text needs a wider window; a fixed size would clip the
+        # transport row and the note beside the Save annotation button.
+        self.setMinimumWidth(900)
         self._build()
+        self.font_scale_label.setText(
+            f"{int(round(self._font_scale * 100))}%")
         self._install_actions()
         self._install_timers()
         self.refresh()
@@ -166,10 +172,58 @@ class MainWindow(QMainWindow):
         self.filter_combo.currentIndexChanged.connect(self.refresh)
         layout.addWidget(self.filter_combo)
         layout.addStretch(1)
+        # Text size, adjustable while the window is open.  A launch flag or an
+        # environment variable means finding it, editing something and
+        # restarting; the person who cannot read the text is the one who has to
+        # act, so the control belongs next to the text it changes.
+        smaller = QPushButton("A-")
+        smaller.setToolTip("Smaller text")
+        smaller.clicked.connect(lambda: self._adjust_font_scale(-1))
+        layout.addWidget(smaller)
+        larger = QPushButton("A+")
+        larger.setToolTip("Larger text")
+        larger.clicked.connect(lambda: self._adjust_font_scale(+1))
+        layout.addWidget(larger)
+        self.font_scale_label = QLabel("")
+        self.font_scale_label.setObjectName("Subtle")
+        layout.addWidget(self.font_scale_label)
+
         self.header_status = QLabel("")
         self.header_status.setObjectName("Subtle")
         layout.addWidget(self.header_status)
         return frame
+
+    def _adjust_font_scale(self, direction: int) -> None:
+        """Change every text size in the window, immediately."""
+        from .theme import MAX_FONT_SCALE, MIN_FONT_SCALE, build_stylesheet
+
+        steps = (0.7, 0.85, 1.0, 1.2, 1.4, 1.6, 1.9, 2.2, 2.5)
+        try:
+            index = steps.index(round(self._font_scale, 3))
+        except ValueError:
+            index = steps.index(min(steps, key=lambda s: abs(s - self._font_scale)))
+        index = max(0, min(len(steps) - 1, index + direction))
+        self._font_scale = steps[index]
+        application = QApplication.instance()
+        if application is not None:
+            application.setStyleSheet(
+                build_stylesheet(self.theme, font_scale=self._font_scale)
+            )
+        self.font_scale_label.setText(
+            f"{int(round(self._font_scale * 100))}%"
+        )
+        # The live monitor paints its own text from the widget font, so it has
+        # to be repainted to pick the new size up.
+        if getattr(self, "live_monitor", None) is not None:
+            self.live_monitor.update()
+        # The event list's column widths are in pixels, so they have to follow.
+        self.event_list.set_font_scale(self._font_scale)
+        # And the window has to be allowed to be wider than the default, or
+        # the transport row is cut off at the right-hand end.
+        self.setMinimumWidth(
+            max(900, int(1280 * self._font_scale))
+        )
+        self._status(f"Text size {int(round(self._font_scale * 100))}%")
 
     def _build_inspector(self) -> QWidget:
         page = QWidget()
@@ -443,6 +497,8 @@ class MainWindow(QMainWindow):
         """Refresh the panel.  Runs on the GUI thread via the bridge signal."""
         self._refresh_separation_attempts()
         self._refresh_separation_status()
+        if result is not None:
+            self.separation.set_busy(False)
         if result is not None and not result.ok:
             self._status(
                 f"Separation failed: {result.error}", error=True
@@ -481,9 +537,24 @@ class MainWindow(QMainWindow):
         ratio = worker.get("last_realtime_ratio")
         if ratio:
             bits.append(f"last run {ratio:.1f}x realtime")
+            # What the current wait is likely to be.  Shown because the cost
+            # is not obvious and two minutes of silence otherwise looks like
+            # a failure rather than a measurement: a 3 s selection took 87 s,
+            # and the first run also pays a 35 s model load.
+            seconds = self._separation_audio_seconds() * ratio
+            if seconds:
+                bits.append(
+                    f"this selection will take about {seconds:.0f}s"
+                )
         if worker.get("last_error"):
             bits.append(f"last error: {worker['last_error']}")
         self.separation.set_status("   ".join(bits))
+
+    def _separation_audio_seconds(self) -> float:
+        """How much audio the next separation would cover."""
+        if self._region is not None:
+            return max(0.0, self._region[1] - self._region[0])
+        return float(self._event_duration or 0.0)
 
     def _on_separate(self, query: str, use_region: bool) -> None:
         if self._stored is None:
@@ -496,6 +567,7 @@ class MainWindow(QMainWindow):
             self._stored, query, start, (end - start) if start is not None else None
         )
         self._status(message, error=not accepted)
+        self.separation.set_busy(accepted)
         self._refresh_separation_status()
 
     def _on_compare_separation(self, path: str) -> None:

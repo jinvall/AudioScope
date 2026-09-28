@@ -46,6 +46,21 @@ from .formatting import EventRow, format_decision, user_confidence
 #: costs a fraction of a percent; it does not run when paused or stopped.
 PLAYHEAD_MS = 50
 
+
+def _pointer_x(event) -> int:
+    """The x coordinate of a mouse event, on either Qt version.
+
+    ``QMouseEvent.position()`` is Qt 6; Qt 5 spells it ``pos()``.  Using the
+    Qt 6 name here raised ``AttributeError`` inside every mouse handler, which
+    Qt swallows - so click-to-seek and drag-to-select did nothing at all, with
+    no error anywhere to explain it.  Checked in one place so the two spellings
+    cannot drift apart again.
+    """
+    position = getattr(event, "position", None)
+    if callable(position):
+        return int(position().x())
+    return int(event.pos().x())
+
 #: How often to check for new events when nothing is pushing them.
 LIVE_POLL_MS = 2000
 
@@ -150,7 +165,7 @@ class WaveformWidget(QWidget):
     def mousePressEvent(self, event):
         if not self._peaks.size:
             return
-        fraction = self._fraction_at(int(event.position().x()))
+        fraction = self._fraction_at(_pointer_x(event))
         if self._selection_enabled and event.button() == Qt.LeftButton:
             # Drag out a region to separate.  Seeking still works on release
             # of a collapsed drag, which is the least surprising behaviour:
@@ -168,7 +183,7 @@ class WaveformWidget(QWidget):
         if not self._selecting:
             return
         self._selecting = False
-        end = self._fraction_at(int(event.position().x()))
+        end = self._fraction_at(_pointer_x(event))
         start, end = sorted((self._anchor, end))
         if end - start < 1e-4:
             self._region = None
@@ -181,7 +196,7 @@ class WaveformWidget(QWidget):
     def mouseMoveEvent(self, event):
         if not self._peaks.size:
             return
-        fraction = self._fraction_at(int(event.position().x()))
+        fraction = self._fraction_at(_pointer_x(event))
         if self._selecting:
             start, end = sorted((self._anchor, fraction))
             self._region = (start, end)
@@ -335,7 +350,7 @@ class SpectrogramWidget(QWidget):
     def mousePressEvent(self, event):
         if self._image is None:
             return
-        fraction = self._fraction_at(int(event.position().x()))
+        fraction = self._fraction_at(_pointer_x(event))
         if self._selection_enabled and event.button() == Qt.LeftButton:
             self._selecting = True
             self._anchor = fraction
@@ -346,7 +361,7 @@ class SpectrogramWidget(QWidget):
         if not self._selecting:
             return
         self._selecting = False
-        end = self._fraction_at(int(event.position().x()))
+        end = self._fraction_at(_pointer_x(event))
         start, end = sorted((self._anchor, end))
         if end - start < 1e-4:
             self._region = None
@@ -360,7 +375,7 @@ class SpectrogramWidget(QWidget):
         if self._image is None or not self._selecting:
             return
         start, end = sorted((self._anchor, self._fraction_at(
-            int(event.position().x()))))
+            _pointer_x(event))))
         self._region = (start, end)
         self.update()
 
@@ -487,10 +502,25 @@ class EventListWidget(QWidget):
     #: Wide enough for the formatted values, so nothing is elided.
     _WIDTHS = (76, 74, 88, 116, 60, 70, 70, 64, 86)
 
+    #: Column widths are in pixels at the default text size, and are scaled
+    #: with it.  Fixed pixel widths are only correct at one font size: at 160%
+    #: every header was elided to nonsense ("Durat", "Decisi", "La") while the
+    #: text itself had grown, which is the opposite of what a larger font is
+    #: for.
+    _font_scale: float = 1.0
+
+    def set_font_scale(self, scale: float) -> None:
+        try:
+            self._font_scale = max(0.7, min(2.5, float(scale)))
+        except (TypeError, ValueError):
+            self._font_scale = 1.0
+        self._apply_column_widths()
+
     def _apply_column_widths(self) -> None:
+        scale = getattr(self, "_font_scale", 1.0) or 1.0
         for index, width in enumerate(self._WIDTHS):
             if index < self.list.columnCount():
-                self.list.setColumnWidth(index, width)
+                self.list.setColumnWidth(index, int(width * scale))
 
     def set_detail_columns(self, enabled: bool) -> None:
         self._show_detail = bool(enabled)
@@ -785,6 +815,7 @@ class SeparationPanel(QWidget):
         super().__init__(parent)
         self._theme = theme
         self._attempts: list = []
+        self._busy = False
         self._region_seconds: Optional[str] = None
         self._use_region = False
         self._build()
@@ -906,6 +937,13 @@ class SeparationPanel(QWidget):
         self.query_box.setCurrentText(current)
         self.query_box.blockSignals(False)
 
+    def set_busy(self, busy: bool) -> None:
+        """Show that a job is running, so silence is not read as failure."""
+        self._busy = bool(busy)
+        self.separate_button.setEnabled(
+            bool(self.query()) and not self._busy
+        )
+
     def set_attempts(self, attempts) -> None:
         """Replace the attempt list, keeping the selection when possible."""
         previous = self.selected_attempt()
@@ -956,7 +994,7 @@ class SeparationPanel(QWidget):
         self.isolated_button.setEnabled(has_audio)
         self.enhanced_button.setEnabled(bool(attempt and attempt.has_enhanced))
         self.save_button.setEnabled(has_audio)
-        self.separate_button.setEnabled(bool(self.query()))
+        self.separate_button.setEnabled(bool(self.query()) and not self._busy)
         if has_audio and self._region_seconds is None and not self._use_region:
             self.region_label.setText("Whole event")
 
