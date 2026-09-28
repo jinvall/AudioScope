@@ -50,6 +50,13 @@ test_output/
 # the fingerprint metadata beside it is small but still derived.
 separation_*/
 
+# Stray files from tooling mistakes.  ':memory:' is SQLite's in-memory
+# database name, which becomes a real file if a path is passed through
+# abspath() - it was committed by accident once already.
+:*memory:*
+.*-shm
+.*-wal
+
 # Editor and OS cruft
 .idea/
 .vscode/
