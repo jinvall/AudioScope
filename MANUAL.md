@@ -567,8 +567,8 @@ nothing you record is ever overwritten.
 | **Confirm** | You are confident about the event |
 | **Uncertain** | It is real but the classification is doubtful |
 | **Reject** | Not a real event. A **negative example**, and as valuable as a positive one — it is protected from eviction too |
-| **Label (optional, yours)** | Your own name for the sound. The project's own classification is separate and is not a claim about what the sound is |
-| **Your confidence** | Optional, and yours. The system publishes no calibrated confidence and will not invent one |
+| **Label (optional, yours)** | Your own name for the sound. **A label you set outranks the detector's**, everywhere the event is named — the list column, the detail panel, the search. The detector's label is not overwritten: it stays recorded underneath as what its rules saw, because your answer ("joey talking") and its answer ("possible_clipping") are answering different questions, and the difference between them is the most informative thing in the record |
+| **Your confidence** | Optional, and yours, shown as a percentage. Note that there is **nothing to compare it against**: the rule-based classifier deliberately reports no confidence, because it has no calibrated probability to report (see `docs/DETECTION_AND_CLASSIFICATION.md` §8). So this records your certainty; it does not override a number on the detector's side, because there is no number there |
 | **Notes** | Free text |
 
 Saving keeps the event. It is not a claim about what the sound is; a label is
@@ -576,6 +576,33 @@ separate and optional.
 
 Human-judged events — saved, confirmed, uncertain **and rejected** — are never
 evicted automatically by the audio retention policy (§10.4).
+
+---
+
+### 9.1 Do my labels make the detector better? Not yet
+
+No. It is worth being blunt about this, because it is a natural assumption and
+it is not currently true.
+
+The classifier is a fixed set of rules with fixed thresholds in the
+configuration file. Your reviews are stored in an append-only history, and they
+are used for three things: filtering the list, statistics, and protecting an
+event's audio from being evicted. **Nothing is learned from them.** No threshold
+moves, no rule is retrained, and adding ten thousand labels would not change a
+single decision the detector makes.
+
+There is also a reason it is not a simple matter of wiring the labels back in.
+The two vocabularies are deliberately different: yours is specific and
+confident ("joey talking", "mouse clicks", "difficult"), the detector's is
+generic and hedged ("possible_knock", "possible_clipping"). Feeding yours back
+as if they were the same thing would replace a useful hedge with a specific
+claim the evidence may not support, and would break the similarity grouping
+that depends on the generic vocabulary.
+
+What the labels *are* good for today is finding out where the rules are wrong.
+An event you corrected is a disagreement between a person's judgement and the
+rules, and the detail panel marks those explicitly. That is the raw material
+for tuning, and it is being collected whether or not anything consumes it yet.
 
 ---
 
@@ -983,6 +1010,11 @@ them.
     similarity search.
 17. **Column widths in the event list are fixed**, and scale with the font size
     but do not reflow.
+18. **Your labels do not change how the system detects.** This is the most
+    important limitation in the manual. The classifier is a fixed set of rules
+    with fixed thresholds; your reviews are recorded and used for filtering,
+    statistics and protection from eviction, but nothing is learned from them
+    and no threshold moves. See §9.1.
 
 ---
 

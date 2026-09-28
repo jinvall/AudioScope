@@ -1499,3 +1499,93 @@ class TestLocalTimestamps:
         assert row.when in row.tooltip()
         # The compact column is still just the clock.
         assert len(row.time) == 8
+
+
+# ======================================================================
+# A label you set outranks the detector's
+# ======================================================================
+class TestLabelPrecedence:
+    """What the reviewer reads is the reviewer's judgement.
+
+    The list used to show your label or nothing, so an event you had not
+    labelled displayed no name at all and the detector's guess was invisible
+    outside the detail panel.
+    """
+
+    def _stored(self, *, user=None, detector="possible_knock", confidence=None):
+        from app.gui.formatting import effective_label, user_corrected
+        from types import SimpleNamespace
+
+        metadata = {"classification": {"label": detector}} if detector else {}
+        annotation = SimpleNamespace(label=user, confidence=confidence)
+        return SimpleNamespace(
+            label=user, confidence=confidence, metadata=metadata,
+            annotations=[annotation] if user is not None else [],
+        ), effective_label, user_corrected
+
+    def test_a_user_label_wins(self):
+        stored, effective_label, _ = self._stored(user="joey talking")
+        assert effective_label(stored) == ("joey talking", "yours")
+
+    def test_the_detector_labels_it_when_you_have_not(self):
+        stored, effective_label, _ = self._stored()
+        assert effective_label(stored) == ("possible_knock", "detector")
+
+    def test_neither_gives_nothing(self):
+        stored, effective_label, _ = self._stored(detector=None)
+        assert effective_label(stored) == ("", "none")
+
+    def test_a_disagreeing_label_is_flagged_as_a_correction(self):
+        stored, _, user_corrected = self._stored(user="joey talking")
+        assert user_corrected(stored) is True
+
+    def test_agreeing_labels_are_not_a_correction(self):
+        stored, _, user_corrected = self._stored(user="Possible_Knock")
+        assert user_corrected(stored) is False, "case alone is not a correction"
+
+    def test_no_user_label_is_never_a_correction(self):
+        stored, _, user_corrected = self._stored()
+        assert user_corrected(stored) is False
+
+    def test_the_row_shows_the_effective_label_and_its_source(self, populated):
+        from app.gui.formatting import build_row
+
+        row = build_row(populated.get_event("event_000000"))
+        assert row.label, "an unlabelled event showed no name at all"
+        assert row.label_source in ("yours", "detector")
+        if row.label_source == "yours":
+            assert "yours" in row.tooltip()
+
+    def test_the_detail_panel_states_the_precedence(self, populated):
+        from app.gui.formatting import describe_event
+
+        description = describe_event(populated.get_event("event_000000"))
+        labels = {
+            field.label: field.value
+            for group in (
+                description.headline, description.acoustics,
+                description.source, description.review,
+                description.technical,
+            )
+            for field in group
+        }
+        assert "Label" in labels
+        if "yours" in labels["Label"]:
+            assert "overriding" in labels["Label"]
+        # The detector's own answer is still there, attributed.
+        assert "Detector's label" in labels
+
+    def test_the_detectors_record_is_never_overwritten(self, controller):
+        """Both answers are kept: yours says what it was, its rules what they saw."""
+        from app.events.database import Decision
+
+        event_id = controller.list_events()[0].event_id
+        before = controller.db.get_event(event_id).metadata[
+            "classification"]["label"]
+        controller.annotate(event_id, label="joey talking",
+                            decision=Decision.SAVED, confidence=0.9)
+        after = controller.db.get_event(event_id)
+        assert after.label == "joey talking"
+        assert after.metadata["classification"]["label"] == before
+        assert after.confidence == pytest.approx(0.9)
+        controller.db.close()

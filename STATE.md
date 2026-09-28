@@ -28,6 +28,17 @@ event. `tools/separation_check.py` proves the whole AGENTS.md section 26 chain:
 the separated audio correlates **-0.013** with the input mixture, where a
 filtered copy would be ≈1.0. See `docs/SOURCE_SEPARATION.md` section 17.
 
+**A label you set outranks the detector's** everywhere the event is named. The
+detector's label is never overwritten - both are kept and attributed, because
+they answer different questions, and an event where they disagree is the most
+informative thing in the record.
+
+**Your reviews do not change how detection works.** The classifier is fixed
+rules with fixed thresholds; labels are recorded, filtered on, and counted, but
+nothing is learned from them. `docs/DATA_AND_STORAGE.md` and the manual (§9.1)
+say so plainly, because a reasonable person would otherwise assume a feedback
+loop that does not exist.
+
 **Timestamps are shown in system time.** They are stored in UTC, which is
 right, and converted for display - showing UTC put events up to a day out and,
 near midday, in the wrong day entirely.
@@ -65,7 +76,7 @@ meter and a scrolling level trace. The capture process publishes it to
 separate processes and the window otherwise cannot ask whether audio is
 arriving right now. Verified against a real phone on 8190.
 
-**682 tests passing**, stable across repeated runs.
+**691 tests passing**, stable across repeated runs.
 
 ## Port allocation
 

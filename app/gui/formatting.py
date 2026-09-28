@@ -201,6 +201,55 @@ def local_date(timestamp) -> str:
     return local.strftime("%Y-%m-%d") if local is not None else UNAVAILABLE
 
 
+#: Where an event's label came from.  A user label outranks the detector's
+#: for anything the reviewer reads, which is the whole point of reviewing.
+LABEL_SOURCE_USER = "yours"
+LABEL_SOURCE_DETECTOR = "detector"
+LABEL_SOURCE_NONE = "none"
+
+
+def effective_label(stored) -> tuple:
+    """The label the event should be called, and who called it that.
+
+    A label you set wins over the detector's, always.  That is what reviewing
+    is for, and the alternative - showing the detector's guess above your own
+    judgement - would make the review controls pointless.
+
+    The detector's label is not overwritten.  It stays recorded, attributed,
+    and visible, because the two answer different questions: yours says what
+    this sound was, the detector's says what its rules could see.  A
+    difference between them is the most informative thing in the record, and
+    it is only informative if both are kept.
+
+    A comparison of "whose confidence is higher" is deliberately not
+    attempted: the rule-based classifier reports no confidence at all, so there
+    is nothing on its side of the comparison to compare against.
+    """
+    metadata = getattr(stored, "metadata", {}) or {}
+    user = (getattr(stored, "label", None) or "").strip()
+    if user:
+        return user, LABEL_SOURCE_USER
+    detector = detector_label(metadata)
+    if detector and detector != UNAVAILABLE:
+        return detector, LABEL_SOURCE_DETECTOR
+    return "", LABEL_SOURCE_NONE
+
+
+def user_corrected(stored) -> bool:
+    """True when a label you set differs from what the detector called it.
+
+    This is supervision, and it is worth keeping visible: an event where your
+    judgement and the rules disagree is exactly the evidence needed to find out
+    where the rules are wrong.
+    """
+    user, source = effective_label(stored)
+    if source != LABEL_SOURCE_USER:
+        return False
+    detector = detector_label(getattr(stored, "metadata", {}) or {})
+    return bool(detector and detector != UNAVAILABLE
+                and detector.casefold() != user.casefold())
+
+
 def detector_label(metadata: dict) -> str:
     """The detector's own label, clearly attributed to the detector."""
     classification = (metadata or {}).get("classification") or {}
@@ -391,7 +440,7 @@ def describe_event(stored) -> EventDescription:
     # -- review: what the human decided ------------------------------
     description.review = [
         Field("Decision", format_decision(stored.decision)),
-        Field("Label", stored.label or "none"),
+        Field("Label", _label_field_value(stored)),
         Field("Notes", stored.notes or ""),
         Field("Reviewer confidence", user_confidence(stored.confidence)),
         Field("Annotations", str(len(stored.annotations))),
@@ -449,6 +498,10 @@ class EventRow:
     #: genuinely ambiguous without one.  Declared last because a defaulted
     #: field may not precede the others.
     when: str = ""
+    #: "yours", "detector" or "none" - which of the two labels is shown.
+    label_source: str = LABEL_SOURCE_NONE
+    #: True when your label differs from the detector's.
+    corrected: bool = False
     detail: dict = field(default_factory=dict)
 
     def compact(self) -> list:
@@ -480,15 +533,46 @@ class EventRow:
             # 00:10 belongs to the previous day in local time even though its
             # stored UTC timestamp says otherwise.
             f"time: {self.when}",
-            f"label: {self.label or 'none'}",
+            f"label: {self.label or 'none'}"
+            + (f" (yours, overriding the detector)"
+               if self.label_source == "yours" and self.corrected
+               else (f" (yours)" if self.label_source == "yours"
+                     else (f" ({self.label_source})"
+                           if self.label_source != "none" else ""))),
             f"decision: {self.decision}",
             f"status: {self.status}",
         ]
         return "\n".join(bits)
 
 
+def _label_field_value(stored) -> str:
+    """The Label field, saying which label wins and why.
+
+    When you have labelled an event that disagrees with the detector, the
+    precedence is stated rather than left to be inferred from two adjacent
+    rows: yours is the event's name, and the detector's is recorded
+    underneath as what its rules saw.
+    """
+    label, source = effective_label(stored)
+    if source == LABEL_SOURCE_USER:
+        confidence = getattr(stored, "confidence", None)
+        stated = f", your confidence {confidence:g}" if confidence is not None else ""
+        if user_corrected(stored):
+            detector = detector_label(getattr(stored, "metadata", {}) or {})
+            return (
+                f"{label}  (yours{stated}, overriding the detector's "
+                f"{detector})"
+            )
+        return f"{label}  (yours{stated})"
+    if source == LABEL_SOURCE_DETECTOR:
+        return f"{label}  (detector's; add a label of your own to override)"
+    return "none"
+
+
 def build_row(stored) -> EventRow:
     """Compact list row for one stored event."""
+    label, source = effective_label(stored)
+    corrected = user_corrected(stored)
     metadata = getattr(stored, "metadata", {}) or {}
     measurements = metadata.get("measurements") or {}
     fingerprint = getattr(stored, "fingerprint", None)
@@ -540,7 +624,9 @@ def build_row(stored) -> EventRow:
         duration=duration(stored.duration),
         decision=format_decision(stored.decision),
         decision_short=decision_short(stored.decision),
-        label=stored.label or "",
+        label=label,
+        label_source=source,
+        corrected=corrected,
         status=status,
         detail={
             "onsets": str(onsets) if onsets != UNAVAILABLE else UNAVAILABLE,
