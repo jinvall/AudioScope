@@ -56,6 +56,7 @@ from .widgets import (
     LiveMonitorWidget,
     ReviewBar,
     SeparationPanel,
+    SimilarListWidget,
     SpectrogramWidget,
     WaveformWidget,
 )
@@ -93,6 +94,8 @@ class MainWindow(QMainWindow):
         self._pending_envelope = None
         self._pending_spectrogram = None
         self._pending_extract = None
+        # The event an extraction came from, so Back has somewhere to go.
+        self._extract_parent_id: Optional[str] = None
         self._font_scale = 1.0
         self._change_marker = controller.change_marker()
         # Separation state.  ``_event_duration`` is the length of the event's
@@ -145,8 +148,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._build_inspector())
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        # The event list needs room for four columns without eliding them.
-        splitter.setSizes([430, 850])
+        # The event list needs room for five columns without eliding them:
+        # the event number, time, duration, decision and label.
+        splitter.setSizes([600, 900])
         outer.addWidget(splitter, 1)
 
         self.status_label = QLabel("")
@@ -195,7 +199,7 @@ class MainWindow(QMainWindow):
 
     def _adjust_font_scale(self, direction: int) -> None:
         """Change every text size in the window, immediately."""
-        from .theme import MAX_FONT_SCALE, MIN_FONT_SCALE, build_stylesheet
+        from .theme import build_stylesheet
 
         steps = (0.7, 0.85, 1.0, 1.2, 1.4, 1.6, 1.9, 2.2, 2.5)
         try:
@@ -362,6 +366,18 @@ class MainWindow(QMainWindow):
         self.extract_button.clicked.connect(self._on_extract_selection)
         layout.addWidget(self.extract_button)
 
+        # Extraction opens a *new* event, so the operator is left looking at
+        # something they did not select.  Without a way back, the only route to
+        # the original is the event list - and the original may have scrolled
+        # out of view among the events that arrived while they were working.
+        self.back_button = QPushButton("Back to original")
+        self.back_button.setVisible(False)
+        self.back_button.setToolTip(
+            "Return to the event this selection was extracted from"
+        )
+        self.back_button.clicked.connect(self._on_back_to_parent)
+        layout.addWidget(self.back_button)
+
         self.selection_label = QLabel("")
         self.selection_label.setObjectName("Muted")
         layout.addWidget(self.selection_label)
@@ -394,12 +410,24 @@ class MainWindow(QMainWindow):
 
     def _build_similar_tab(self) -> QWidget:
         area, holder, layout = self._scroll_holder()
-        self.similar_label = QLabel("Not computed")
-        self.similar_label.setObjectName("Muted")
-        self.similar_label.setWordWrap(True)
-        layout.addWidget(self.similar_label)
-        layout.addStretch(1)
+        self.similar = SimilarListWidget(self.theme)
+        # Clicking a hit opens that event, which is the only way it can then
+        # be judged, played or separated.
+        self.similar.event_activated.connect(self._on_similar_activated)
+        layout.addWidget(self.similar, 1)
         return area
+
+    def _on_similar_activated(self, event_id: str) -> None:
+        """Open an event found by similarity, and say where it came from."""
+        if not event_id or self._stored is None:
+            return
+        origin = self._stored.event_id
+        if event_id == origin:
+            return
+        self.select_event(event_id)
+        self._status(
+            f"Jumped to {event_id}, found by similarity to {origin}."
+        )
 
     def _build_separation_tab(self) -> QWidget:
         """The separation panel: query, attempts, and A/B comparison.
@@ -690,15 +718,52 @@ class MainWindow(QMainWindow):
             )
             return
         start, end = self._region
+        parent_id = self._stored.event_id
         self._pending_extract = self.controller.begin_extract_selection(
             self._stored, start, end
         )
+        self._extract_parent_id = parent_id
+        # Say where Back will take them, before they commit to waiting.
+        self.back_button.setText(f"Back to {parent_id}")
+        self.back_button.setVisible(True)
         self.extract_button.setEnabled(False)
         self._status(
             f"Extracting {start:.2f}-{end:.2f}s as a new event... "
             f"analysing it takes a moment."
         )
         QTimer.singleShot(200, self._pump_extract)
+
+    def _on_back_to_parent(self) -> None:
+        """Return to the event the extracted selection came from.
+
+        Only offered while there is a real parent to return to, and cleared as
+        soon as the operator selects an event by any other route - a Back
+        button that silently jumps somewhere unexpected is worse than none.
+        """
+        parent_id = self._extract_parent_id
+        if not parent_id:
+            self._status("There is no extracted selection to go back from")
+            return
+        if parent_id == (self._stored.event_id if self._stored else None):
+            self._forget_extract_parent()
+            self._status(f"Already on {parent_id}")
+            return
+        stored = self.controller.select(parent_id)[0]
+        if stored is None:
+            # The parent is no longer in the database, so there is nowhere to
+            # go.  Say so rather than appearing to do nothing.
+            self._forget_extract_parent()
+            self._status(
+                f"{parent_id} is no longer in the database", error=True
+            )
+            return
+        self._forget_extract_parent()
+        self.select_event(parent_id)
+        self._status(f"Back to {parent_id}, the event you extracted from")
+
+    def _forget_extract_parent(self) -> None:
+        self._extract_parent_id = None
+        self.back_button.setVisible(False)
 
     def _pump_extract(self) -> None:
         pending = self._pending_extract
@@ -818,6 +883,11 @@ class MainWindow(QMainWindow):
         self._playhead.stop()
         self.play_button.setText("Play")
 
+        # A Back button that survives an unrelated selection would send the
+        # operator to an event they did not ask for.
+        if self._extract_parent_id and self._extract_parent_id != event_id:
+            self._forget_extract_parent()
+
         stored, description = self.controller.select(event_id)
         if stored is None:
             self.title_label.setText("Event not found")
@@ -844,7 +914,7 @@ class MainWindow(QMainWindow):
 
         self.waveform.clear()
         self.spectrogram.clear()
-        self.similar_label.setText("Not computed")
+        self.similar.set_message("Not computed")
         self._duration = 0.0
         self._event_duration = 0.0
         self._playback_source = "original"
@@ -971,24 +1041,21 @@ class MainWindow(QMainWindow):
 
     def _build_similar(self) -> None:
         if self._stored is None:
-            self.similar_label.setText("Select an event first")
+            self.similar.set_message("Select an event first")
             return
         try:
             hits = self.controller.similar(self._stored.event_id, limit=5)
         except Exception as exc:
-            self.similar_label.setText(f"Similarity unavailable: {exc}")
+            self.similar.set_message(f"Similarity unavailable: {exc}")
             return
         if not hits:
-            self.similar_label.setText(
+            self.similar.set_message(
                 "No comparable events stored, or this event has no "
-                "fingerprint."
+                "fingerprint. Every retained event is fingerprinted, so this "
+                "usually means the store holds only this one event."
             )
             return
-        lines = ["Closest stored events:", ""]
-        for other_id, distance, other in hits:
-            label = (other.label or "no label") if other else "unavailable"
-            lines.append(f"  {other_id}   distance {distance:.3f}   {label}")
-        self.similar_label.setText("\n".join(lines))
+        self.similar.set_hits(hits)
 
     def _build_spectrogram(self) -> None:
         """Build the spectrogram on demand, off the GUI thread."""

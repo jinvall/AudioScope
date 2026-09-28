@@ -282,8 +282,10 @@ sees 16-bit or 44.1 kHz.
 
 ### 5.2 The event list
 
-Columns are **Time, Duration, Decision, Label**. The decision is shown as
-`new` until you judge the event. Right-click or use the filter at the top-left
+Columns are **Event, Time, Duration, Decision, Label**. The event number is
+first because it is the handle everything else uses: the separation CLI takes
+it as `--event`, the metadata file names it, the similarity results quote it.
+The decision shows as `new` until you judge the event. Right-click or use the filter at the top-left
 to narrow the list to *Not reviewed*, *Saved*, *Confirmed*, *Uncertain* or
 *Rejected*.
 
@@ -300,6 +302,7 @@ without a restart.
 | **Loop** | Repeats playback |
 | **Select** | Arms region selection on the waveform and spectrogram |
 | **Extract selection** | Saves the selected region as a new event (§8) |
+| **Back to original** | Appears after an extraction, and returns to the event the selection came from. Disappears as soon as you select any other event, so it can never take you somewhere you did not ask for |
 | **Volume** | Playback volume; does not affect stored audio |
 
 Clicking the waveform seeks. With **Select** armed, dragging selects instead.
@@ -314,7 +317,7 @@ Clicking the waveform seeks. With **Select** armed, dragging selects instead.
 | **Review** | The annotation controls in full, with the note about what saving does and does not mean |
 | **Details** | Every field stored for the event, grouped |
 | **Spectrogram** | Frequency content over time, generated on first open for this event |
-| **Similar** | The five closest stored events by fingerprint distance |
+| **Similar** | The five closest stored events by fingerprint distance. **Click one to open it**, then judge it with the review controls below. The distance is a fingerprint distance, not a certainty: 0 is identical, and a small number means acoustically similar. An event whose audio has been evicted is marked rather than offering playback that cannot work |
 | **Separate** | Query input, attempt history, A/B comparison, save (§7) |
 | **Live** | Connection verification and a live level trace (§6) |
 
@@ -496,6 +499,13 @@ honking. This feature lets you keep just the part you care about.
 The selection becomes a new event with its own audio, duration, level and
 provenance. **The parent is never modified.** The new event opens immediately
 so you can listen to what you kept.
+
+Because you are now looking at something you did not select, a **Back to
+event_NNNNNN** button appears in the transport and returns you to the event
+you extracted from. It disappears as soon as you select any other event — a
+Back button that outlives its reason and jumps somewhere unexpected is worse
+than none. If the parent is no longer in the database, it says so rather than
+appearing to do nothing.
 
 ### 8.2 What you get
 
@@ -1063,8 +1073,11 @@ Audio retention — §10.4, §12.1, §17.10
 Band — §18
 Byte caps — §10.4, §12.2
 
+**B**
+Back to original — §5.3, §8.1
+
 **C**
-Change point — §18
+Change point — §4.2, §18
 Classification — §9, §18
 Click-to-seek — §5.3
 Closing the window stops capture — §4.3, §3
@@ -1081,7 +1094,7 @@ Desktop icon — §2.4, §15
 
 **E**
 Event — §4.1, §10.1, §18
-Event id — §10.1
+Event id — §5.2, §10.1
 Event list — §5.2
 `--events` — §11.1, §17.12
 Event tree — §10.1
@@ -1155,7 +1168,8 @@ Retention — §10.4, §18
 
 **S**
 Save — §9
-Similarity — §17.6, §18
+Similarity — §5.4, §17.6, §18
+Similar tab, clickable — §5.4
 Source separation — §7, §18
 Spectrogram — §5.4, §8.1
 Spectral centroid — §18
@@ -1170,6 +1184,7 @@ Separation environment — §2.3
 
 **T**
 Table of contents — top of document
+Tabs — §5.4
 Text size — §5.5
 Troubleshooting — §15
 Trust and confidence — §1, §9

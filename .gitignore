@@ -58,6 +58,7 @@ separation_*/
 .*-wal
 
 # Editor and OS cruft
+.~lock.*#
 .idea/
 .vscode/
 *.swp

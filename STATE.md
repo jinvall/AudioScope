@@ -28,6 +28,15 @@ event. `tools/separation_check.py` proves the whole AGENTS.md section 26 chain:
 the separated audio correlates **-0.013** with the input mixture, where a
 filtered copy would be ≈1.0. See `docs/SOURCE_SEPARATION.md` section 17.
 
+**Similar events are clickable.** The Similar tab lists the closest stored
+events as a table; clicking one opens it in the window, so it can be judged,
+played or separated without hunting for it in the list. The event number is
+now the first column of the event list, since it is the identifier the CLI,
+the metadata and the similarity results all use.
+
+**After an extraction, a Back button returns to the original event** and
+disappears as soon as any other event is selected.
+
 **A selected region of an event can be extracted as an event of its own.**
 Drag on the waveform or the spectrogram, then "Extract selection": the
 selection becomes a new event with its own audio, measurements and provenance,
@@ -43,7 +52,7 @@ meter and a scrolling level trace. The capture process publishes it to
 separate processes and the window otherwise cannot ask whether audio is
 arriving right now. Verified against a real phone on 8190.
 
-**624 tests passing**, stable across repeated runs.
+**633 tests passing**, stable across repeated runs.
 
 ## Port allocation
 

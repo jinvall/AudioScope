@@ -299,10 +299,11 @@ def test_rows_are_compact_by_default(controller):
     rows = build_rows(controller.list_events())
     assert rows
     for row in rows:
-        # Time, duration, decision, label - nothing technical.
-        assert len(row.compact()) == 4
+        # Event number, time, duration, decision, label - nothing technical.
+        assert len(row.compact()) == 5
+        assert row.compact()[0] == row.event_id, "the number shown is the id"
         assert row.detail                       # available behind "Details"
-        assert len(row.full()) == 9
+        assert len(row.full()) == 10
 
 
 def test_row_marks_missing_audio(controller):
@@ -1191,3 +1192,146 @@ def test_a_click_seeks_with_a_real_mouse(app_qt, theme):
     assert seeks, "a click produced no seek"
     assert abs(seeks[-1] - 0.5) < 0.02
     widget.close()
+
+
+# ======================================================================
+# The three review affordances
+# ======================================================================
+def test_the_event_number_is_in_the_list(app_qt, controller):
+    """The id is the handle for everything else, so it must be readable."""
+    from app.gui.formatting import build_rows
+    from app.gui.widgets import LIST_COLUMNS, EventListWidget
+
+    rows = build_rows(controller.list_events())
+    assert rows
+    assert "Event" in LIST_COLUMNS
+    for row in rows:
+        compact = row.compact()
+        assert compact[0] == row.event_id
+    # A width for every column, or the last one is unset and the header
+    # elides.
+    assert len(EventListWidget._WIDTHS) >= len(LIST_COLUMNS)
+
+
+def test_a_similar_hit_opens_that_event(app_qt, controller, populated):
+    """The whole point of the panel: a hit you can act on."""
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    events = populated.list_events()
+    if len(events) < 2:
+        pytest.skip("needs two stored events")
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        first = events[0].event_id
+        window.select_event(first)
+        for _ in range(20):
+            app_qt.processEvents()
+        hits = controller.similar(first, limit=5)
+        if not hits:
+            pytest.skip("these events have no comparable fingerprints")
+        window._build_similar()
+        target = hits[0][0]
+        assert window.similar.hits(), "the panel listed nothing"
+        assert window.similar.list.topLevelItemCount() == len(hits)
+        # Activating a row brings that event into the window.
+        window.similar.event_activated.emit(target)
+        for _ in range(30):
+            app_qt.processEvents()
+        assert window._stored.event_id == target
+        # And it is named in the status line, so the jump is not a mystery.
+        assert target in window.status_label.text()
+    finally:
+        window.close()
+        controller.db.close()
+
+
+def test_similar_rows_mark_events_whose_audio_is_gone(app_qt, controller,
+                                                     populated):
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    events = populated.list_events()
+    if len(events) < 2:
+        pytest.skip("needs two stored events")
+    # Take the audio away from one event, so a row has to say so.
+    victim = events[1].event_id
+    populated.set_audio_path(victim, None)
+    populated.set_audio_state(victim, available=False)
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        first = events[0].event_id
+        hits = controller.similar(first, limit=5)
+        if not hits:
+            pytest.skip("no comparable fingerprints")
+        window.similar.set_hits(hits)
+        texts = [
+            window.similar.list.topLevelItem(i).text(3)
+            for i in range(window.similar.list.topLevelItemCount())
+        ]
+        assert any("no audio" in t for t in texts), texts
+    finally:
+        window.close()
+        controller.db.close()
+
+
+def test_back_returns_to_the_event_an_extraction_came_from(app_qt, controller):
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        assert window.back_button.isVisible() is False
+        # Extraction from event_000000 opened event_000001.
+        window.select_event("event_000001")
+        window._extract_parent_id = "event_000000"
+        window.back_button.setText("Back to event_000000")
+        window.back_button.setVisible(True)
+
+        window._on_back_to_parent()
+        for _ in range(30):
+            app_qt.processEvents()
+        assert window._stored.event_id == "event_000000"
+        # And the way back is gone, because there is nothing to go back from.
+        assert window._extract_parent_id is None
+        assert window.back_button.isVisible() is False
+    finally:
+        window.close()
+        controller.db.close()
+
+
+def test_back_does_nothing_when_there_is_no_parent(app_qt, controller):
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        window.select_event("event_000000")
+        before = window._stored.event_id
+        window._on_back_to_parent()
+        for _ in range(20):
+            app_qt.processEvents()
+        assert window._stored.event_id == before
+        assert "no extracted selection" in window.status_label.text().lower()
+    finally:
+        window.close()
+        controller.db.close()
+
+
+def test_selecting_another_event_clears_the_way_back(app_qt, controller):
+    """A Back button that survives an unrelated selection is a trap."""
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        window.select_event("event_000001")
+        window._extract_parent_id = "event_000000"
+        window.back_button.setVisible(True)
+        window.select_event("event_000002")
+        assert window._extract_parent_id is None
+        assert window.back_button.isVisible() is False
+    finally:
+        window.close()
+        controller.db.close()

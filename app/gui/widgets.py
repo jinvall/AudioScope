@@ -435,7 +435,7 @@ class SpectrogramWidget(QWidget):
 
 
 #: Default columns.  Compact on purpose; the wider set is opt-in.
-LIST_COLUMNS = ("Time", "Duration", "Decision", "Label")
+LIST_COLUMNS = ("Event", "Time", "Duration", "Decision", "Label")
 LIST_COLUMNS_FULL = LIST_COLUMNS + (
     "Onsets", "Presence", "Level dB", "SNR dB", "Reason",
 )
@@ -500,7 +500,11 @@ class EventListWidget(QWidget):
 
     # ------------------------------------------------------------------
     #: Wide enough for the formatted values, so nothing is elided.
-    _WIDTHS = (76, 74, 88, 116, 60, 70, 70, 64, 86)
+    #: (event number, time, duration, decision, label, then the optional
+    #: detail columns) - in the same order as ``LIST_COLUMNS`` and
+    #: ``LIST_COLUMNS_FULL``.  The event number is wide because it is a
+    #: six-digit id with a prefix.
+    _WIDTHS = (134, 96, 92, 100, 86, 66, 76, 76, 70, 92)
 
     #: Column widths are in pixels at the default text size, and are scaled
     #: with it.  Fixed pixel widths are only correct at one font size: at 160%
@@ -1197,3 +1201,99 @@ class LiveMonitorWidget(QWidget):
         if state == "stopped":
             return self._colour("text-subtle", "#6d7086")
         return self._colour("warning", "#ffb020")
+
+
+class SimilarListWidget(QWidget):
+    """The closest stored events, as a list you can act on.
+
+    The point of this panel is to find an event you have already looked at, so
+    the rows are clickable and selecting one brings that event into the
+    window - which is the only way it can then be judged, played or separated.
+    A list of text lines, as this was, made the next step impossible: it
+    showed you that the event existed and then made you go and find it.
+
+    Each row carries the event id, the fingerprint distance, the decision and
+    the label, and an event whose audio has been evicted is marked rather than
+    silently offering playback that cannot work.
+    """
+
+    #: A row was activated, with the event id it belongs to.
+    event_activated = pyqtSignal(str)
+
+    COLUMNS = ("Event", "Distance", "Duration", "Decision", "Label")
+
+    def __init__(self, theme, parent=None):
+        super().__init__(parent)
+        self._theme = theme
+        self._hits: list = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.hint = QLabel("Not computed")
+        self.hint.setObjectName("Muted")
+        self.hint.setWordWrap(True)
+        layout.addWidget(self.hint)
+
+        self.list = QTreeWidget()
+        self.list.setColumnCount(len(self.COLUMNS))
+        self.list.setHeaderLabels(list(self.COLUMNS))
+        self.list.setRootIsDecorated(False)
+        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list.setUniformRowHeights(True)
+        self.list.itemActivated.connect(self._on_activated)
+        self.list.itemClicked.connect(self._on_activated)
+        layout.addWidget(self.list, 1)
+
+        self._hint_text = "Not computed"
+
+    # ------------------------------------------------------------------
+    def set_hint(self, text: str) -> None:
+        self._hint_text = text or ""
+        self.hint.setText(self._hint_text)
+
+    def set_message(self, text: str) -> None:
+        """Replace the list with a single explanation."""
+        self._hits = []
+        self.list.clear()
+        self.set_hint(text)
+
+    def set_hits(self, hits) -> None:
+        """Show (event_id, distance, stored) tuples, closest first."""
+        self._hits = list(hits)
+        self.list.clear()
+        for event_id, distance, stored in self._hits:
+            decision = "unavailable"
+            duration = "-"
+            label = ""
+            if stored is not None:
+                decision = (stored.decision.value
+                            if hasattr(stored.decision, "value")
+                            else str(stored.decision))
+                label = stored.label or "-"
+                if stored.duration is not None:
+                    duration = f"{stored.duration:.2f} s"
+                if not stored.is_playable:
+                    decision = f"{decision}, no audio"
+            item = QTreeWidgetItem([
+                str(event_id), f"{float(distance):.4f}", duration, decision, label
+            ])
+            item.setData(0, Qt.UserRole, str(event_id))
+            self.list.addTopLevelItem(item)
+        if self._hits:
+            self.list.setCurrentItem(self.list.topLevelItem(0))
+            self.set_hint(
+                "Click an event to open it, then judge it below. "
+                "Distance is a fingerprint distance, not a certainty: 0 is "
+                "identical, and a small number means acoustically similar."
+            )
+        for index in range(self.list.columnCount()):
+            self.list.resizeColumnToContents(index)
+
+    def hits(self) -> list:
+        return list(self._hits)
+
+    def _on_activated(self, item, _column=0) -> None:
+        event_id = item.data(0, Qt.UserRole)
+        if event_id:
+            self.event_activated.emit(str(event_id))

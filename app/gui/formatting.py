@@ -391,8 +391,16 @@ class EventRow:
     detail: dict = field(default_factory=dict)
 
     def compact(self) -> list:
-        """The default columns: time, duration, decision, label."""
-        return [self.time, self.duration, self.decision_short, self.label]
+        """The default columns: event number, time, duration, decision, label.
+
+        The event number is shown because it is the identifier everything else
+        uses: the separation CLI takes it as ``--event``, the metadata file
+        names it, the similarity results quote it, and a reviewer comparing an
+        event against a note or a chat message has to be able to read it off
+        the list rather than counting rows.
+        """
+        return [self.event_id, self.time, self.duration,
+                self.decision_short, self.label]
 
     def full(self) -> list:
         """Optional extra columns, behind a toggle rather than shown always."""
