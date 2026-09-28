@@ -44,6 +44,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..audio.playback import AudioPlayer, PlaybackError, PlaybackState
+from ..config import format_byte_size
 from ..events.database import Decision
 from .controller import ReviewController
 from .formatting import build_rows, describe_event
@@ -54,6 +55,7 @@ from .widgets import (
     EventListWidget,
     FieldPanel,
     LiveMonitorWidget,
+    RecordingControlWidget,
     ReviewBar,
     SeparationPanel,
     SimilarListWidget,
@@ -94,6 +96,7 @@ class MainWindow(QMainWindow):
         self._pending_envelope = None
         self._pending_spectrogram = None
         self._pending_extract = None
+        self._pending_clear = None
         # The event an extraction came from, so Back has somewhere to go.
         self._extract_parent_id: Optional[str] = None
         self._font_scale = 1.0
@@ -144,6 +147,9 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         self.event_list = EventListWidget(self.theme)
         self.event_list.event_selected.connect(self.select_event)
+        self.event_list.clear_unreviewed_requested.connect(
+            self._on_clear_unreviewed_audio
+        )
         splitter.addWidget(self.event_list)
         splitter.addWidget(self._build_inspector())
         splitter.setStretchFactor(0, 0)
@@ -474,7 +480,39 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
         self.live_monitor = LiveMonitorWidget(self.theme)
         layout.addWidget(self.live_monitor, 1)
+
+        # Capture's own setting, adjustable while capture runs.  On this tab
+        # because this is the tab that reports what capture is doing.
+        self.recording_control = RecordingControlWidget(self.theme)
+        self.recording_control.chunk_seconds_requested.connect(
+            self._on_chunk_seconds_requested
+        )
+        layout.addWidget(self.recording_control)
         return page
+
+    def _on_chunk_seconds_requested(self, seconds: float) -> None:
+        """Ask capture to change the recording chunk length.
+
+        A request, not an order: capture applies it and echoes the length it
+        is actually using, and the refusal of an out-of-range value is shown
+        rather than swallowed.
+        """
+        from ..control import write_control
+
+        path = write_control(
+            self.controller.capture_dir(), chunk_seconds=float(seconds)
+        )
+        if path is None:
+            self._status(
+                "Could not ask capture to change the chunk length: the "
+                "control file could not be written.",
+                error=True,
+            )
+            return
+        self._status(
+            f"Asked for {seconds:g}s chunks. The file being written finishes "
+            f"at its current length; the new one applies to the next."
+        )
 
     def _refresh_live(self) -> None:
         """Poll the published capture status.  Cheap, and never blocks.
@@ -495,6 +533,10 @@ class MainWindow(QMainWindow):
             detail = ""
         summary = summarise_live_status(document)
         self.live_monitor.set_summary(summary)
+        # What capture is actually doing, not what was asked of it.
+        self.recording_control.set_in_force(
+            document.get("chunk_seconds") if document else None
+        )
 
         # The footer, drawn inside the panel: the trace then owns all the
         # space that is left, at any window size.
@@ -669,6 +711,81 @@ class MainWindow(QMainWindow):
             self.extract_button.setEnabled(
                 self._stored is not None and bool(self._stored.audio_path)
             )
+
+    # ------------------------------------------------------------------
+    # Clearing unreviewed audio
+    # ------------------------------------------------------------------
+    def _on_clear_unreviewed_audio(self) -> None:
+        """Free the disk taken by unreviewed events, after confirming.
+
+        The confirmation always appears, and it quotes the preview rather than
+        a remembered number: the preview and the run are the same code with
+        ``dry_run`` flipped, so the figures cannot disagree.
+        """
+        try:
+            report = self.controller.preview_clear_unreviewed()
+        except Exception as exc:
+            self._status(f"Could not work out what would be cleared: {exc}",
+                         error=True)
+            return
+
+        if not report.would_change_anything:
+            self._status(
+                "No unreviewed event has audio to clear. They may already have "
+                "been cleared, or evicted by the retention policy."
+            )
+            return
+
+        confirm = QMessageBox(self)
+        confirm.setWindowTitle("Clear unreviewed audio")
+        confirm.setIcon(QMessageBox.Warning)
+        confirm.setText(
+            f"Delete the audio of {report.with_audio} unreviewed "
+            f"event{'s' if report.with_audio != 1 else ''}?"
+        )
+        confirm.setInformativeText(
+            f"{format_byte_size(report.freed_bytes)} would be freed.\n\n"
+            "Their fingerprints, measurements, classifications and any notes "
+            "are kept, so the events stay listed, comparable and searchable. "
+            "Only the audio is deleted, and it cannot be recovered.\n\n"
+            "Events you have saved, confirmed, rejected or marked uncertain are "
+            "not touched, and separation output is kept."
+        )
+        clear_button = confirm.addButton("Delete the audio", QMessageBox.DestructiveRole)
+        confirm.addButton(QMessageBox.Cancel)
+        confirm.exec_()
+        if confirm.clickedButton() is not clear_button:
+            self._status("Nothing was cleared")
+            return
+
+        self._pending_clear = self.controller.begin_clear_unreviewed_audio()
+        self._status("Clearing unreviewed audio...")
+        QTimer.singleShot(200, self._pump_clear)
+
+    def _pump_clear(self) -> None:
+        pending = self._pending_clear
+        if pending is None:
+            return
+        if not pending.done:
+            QTimer.singleShot(200, self._pump_clear)
+            return
+        self._pending_clear = None
+        if pending.error:
+            self._status(f"Clearing failed: {pending.error}", error=True)
+            return
+        report = pending.result
+        self.refresh()
+        self._clear_region()
+        detail = ""
+        if report and report.retained_separation_bytes:
+            detail = (
+                f" {format_byte_size(report.retained_separation_bytes)} of "
+                f"separation output was kept."
+            )
+        if report and report.errors:
+            detail += f" {len(report.errors)} could not be removed."
+        self._status((report.summary() if report else "Nothing was cleared")
+                     + detail)
 
     def _on_select_region_toggled(self, enabled: bool) -> None:
         """Arm or disarm region selection everywhere, from either control."""

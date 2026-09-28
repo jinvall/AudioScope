@@ -16,6 +16,7 @@ verbatim; the interface never assumes what a sound is.
 
 from __future__ import annotations
 
+import datetime
 import math
 from dataclasses import dataclass, field
 from typing import Optional
@@ -137,12 +138,67 @@ def duration(value) -> str:
     return f"{seconds / 60:.1f} min"
 
 
+def parse_timestamp(timestamp) -> Optional[datetime.datetime]:
+    """Parse a stored timestamp, or return None.
+
+    Timestamps are written in UTC with an offset, which is right: the record
+    has to mean the same instant whatever machine reads it.  A timestamp with
+    no offset is assumed to be UTC, because that is what this project has
+    always written, and silently treating it as local would shift every older
+    record by the machine's offset.
+    """
+    text = str(timestamp or "").strip()
+    if not text or text == UNAVAILABLE:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
+def local_time(timestamp) -> Optional[datetime.datetime]:
+    """A stored timestamp as a datetime in the machine's own timezone.
+
+    Everything the operator reads is converted to system time.  Timestamps are
+    *stored* in UTC, which is the only choice that keeps a record meaningful
+    across machines and daylight-saving changes, but showing a UTC clock to
+    someone whose day runs on their own clock is simply wrong: a recording at
+    04:45 UTC was made at 21:45 the previous evening, and displaying the former
+    makes the event look like it belongs to a different session - or, near
+    midday, to a different day entirely.
+    """
+    parsed = parse_timestamp(timestamp)
+    return parsed.astimezone() if parsed is not None else None
+
+
 def clock_time(timestamp) -> str:
-    """Wall-clock time of an ISO timestamp, for a compact list column."""
-    text = str(timestamp or "")
-    if "T" not in text:
-        return text or UNAVAILABLE
-    return text.split("T", 1)[1][:8]
+    """System-local wall-clock time, for a compact list column."""
+    local = local_time(timestamp)
+    if local is None:
+        text = str(timestamp or "")
+        if "T" not in text:
+            return text or UNAVAILABLE
+        return text.split("T", 1)[1][:8]
+    return local.strftime("%H:%M:%S")
+
+
+def local_stamp(timestamp) -> str:
+    """Full system-local date and time, for tooltips and detail panels."""
+    local = local_time(timestamp)
+    if local is None:
+        return str(timestamp or "") or UNAVAILABLE
+    return local.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def local_date(timestamp) -> str:
+    """The system-local date, so a time near midnight is not ambiguous."""
+    local = local_time(timestamp)
+    return local.strftime("%Y-%m-%d") if local is not None else UNAVAILABLE
 
 
 def detector_label(metadata: dict) -> str:
@@ -236,7 +292,7 @@ def describe_event(stored) -> EventDescription:
     # -- headline: what and when -------------------------------------
     description.headline = [
         Field("Event", stored.event_id),
-        Field("Time", clock_time(stored.timestamp)),
+        Field("Time", local_stamp(stored.timestamp)),
         Field("Duration", duration(stored.duration)),
         Field("Audio stored", audio.get("stored_duration_seconds")
               and duration(audio["stored_duration_seconds"])
@@ -388,6 +444,11 @@ class EventRow:
     decision_short: str
     label: str
     status: str
+    #: Full system-local date and time, for the tooltip.  The compact ``time``
+    #: column cannot carry a date, and an event recorded near midnight is
+    #: genuinely ambiguous without one.  Declared last because a defaulted
+    #: field may not precede the others.
+    when: str = ""
     detail: dict = field(default_factory=dict)
 
     def compact(self) -> list:
@@ -415,6 +476,10 @@ class EventRow:
     def tooltip(self) -> str:
         bits = [
             f"{self.event_id}",
+            # Full date and time, not just the column's clock: an event at
+            # 00:10 belongs to the previous day in local time even though its
+            # stored UTC timestamp says otherwise.
+            f"time: {self.when}",
             f"label: {self.label or 'none'}",
             f"decision: {self.decision}",
             f"status: {self.status}",
@@ -471,6 +536,7 @@ def build_row(stored) -> EventRow:
     return EventRow(
         event_id=stored.event_id,
         time=clock_time(stored.timestamp),
+        when=local_stamp(stored.timestamp),
         duration=duration(stored.duration),
         decision=format_decision(stored.decision),
         decision_short=decision_short(stored.decision),

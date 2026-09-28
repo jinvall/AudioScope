@@ -102,6 +102,7 @@ class LiveStatusPublisher:
         self._last_publish = 0.0
         self._connected_once = False
         self._stopped = False
+        self._chunk_seconds: Optional[float] = None
         self.published = 0
         self.publish_errors = 0
 
@@ -132,6 +133,11 @@ class LiveStatusPublisher:
                 del self._levels[: len(self._levels) - self.envelope_columns]
             self._level_dbfs = rms_db
             self._peak_dbfs = peak_db
+
+    def set_chunk_seconds(self, seconds: Optional[float]) -> None:
+        """Record the continuous-recording chunk length actually in force."""
+        with self._lock:
+            self._chunk_seconds = None if seconds is None else float(seconds)
 
     def mark_stopped(self) -> None:
         with self._lock:
@@ -192,6 +198,7 @@ class LiveStatusPublisher:
                 "level_dbfs": round(level, 2) if level is not None else None,
                 "peak_dbfs": round(peak, 2) if peak is not None else None,
                 "envelope": [round(value, 2) for value in levels],
+                "chunk_seconds": self._chunk_seconds,
                 "envelope_hop_ms": None,
                 "clients": clients,
             }

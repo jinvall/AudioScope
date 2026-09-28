@@ -133,6 +133,13 @@ class ReviewController:
         self._worker = None
         self._separator = None
         self._separation_listeners: list = []
+        # Audio retention accounting belongs to the *capture* process, which is
+        # the one that writes audio; the review window is a separate process
+        # and does not maintain it.  It is held here only so an operation that
+        # removes audio can keep the persisted snapshot honest, and it is
+        # normally None in this process.  Reconciliation re-derives the truth
+        # from the filesystem, so nothing depends on it being present.
+        self._retention = None
         # Two independent roots, and conflating them is a bug: the events tree
         # is wherever the capture pipeline was told to write, while the
         # separation model is installed inside the project.  A run with
@@ -487,6 +494,37 @@ class ReviewController:
         if worker is not None:
             worker.stop()
             self._worker = None
+
+    # ------------------------------------------------------------------
+    # Clearing unreviewed audio
+    # ------------------------------------------------------------------
+    def preview_clear_unreviewed(self) -> Any:
+        """What clearing unreviewed audio would do.  Touches nothing."""
+        from ..events.clear import clear_unreviewed_audio
+
+        return clear_unreviewed_audio(self.db, self._retention, dry_run=True)
+
+    def begin_clear_unreviewed_audio(self) -> Pending:
+        """Clear the audio of every unreviewed event, off the GUI thread.
+
+        The preview and the run are the same code with ``dry_run`` flipped, so
+        the figures the user confirms are the figures it reports.
+        """
+        pending = Pending(kind="clear_unreviewed", event_id="", token=self._next_token())
+
+        def work() -> None:
+            try:
+                from ..events.clear import clear_unreviewed_audio
+
+                pending.result = clear_unreviewed_audio(
+                    self.db, self._retention, dry_run=False
+                )
+            except Exception as exc:
+                pending.error = f"{type(exc).__name__}: {exc}"
+            finally:
+                pending.done = True
+
+        return _dispatch(work, pending)
 
     def begin_extract_selection(
         self, stored: StoredEvent, start_seconds: float, end_seconds: float

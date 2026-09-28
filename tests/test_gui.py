@@ -1335,3 +1335,167 @@ def test_selecting_another_event_clears_the_way_back(app_qt, controller):
     finally:
         window.close()
         controller.db.close()
+
+
+def test_the_clear_button_exists_and_reports_when_there_is_nothing_to_do(
+    app_qt, controller, monkeypatch
+):
+    """Nothing to clear must say so - and must not even ask.
+
+    If a confirmation appeared for an empty operation, a reviewer would be
+    trained to click through dialogs, which is how a real one gets clicked
+    through by accident.
+    """
+    from PyQt5.QtWidgets import QMessageBox
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    def would_block(self):
+        raise AssertionError("a confirmation was shown with nothing to clear")
+
+    monkeypatch.setattr(QMessageBox, "exec_", would_block)
+    monkeypatch.setattr(QMessageBox, "clickedButton",
+                        lambda self: QMessageBox.DestructiveRole)
+
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        assert window.event_list.clear_unreviewed_button is not None
+        assert "clear" in (
+            window.event_list.clear_unreviewed_button.text().lower()
+        )
+        # The fixture's events do have audio, so take it away to get the
+        # genuine nothing-to-do case.
+        for event in controller.list_events():
+            controller.db.set_audio_path(event.event_id, None)
+            controller.db.set_audio_state(event.event_id, available=False)
+        window._on_clear_unreviewed_audio()
+        for _ in range(20):
+            app_qt.processEvents()
+        assert "no unreviewed event" in window.status_label.text().lower()
+    finally:
+        window.close()
+        controller.db.close()
+
+
+def test_cancelling_the_confirmation_clears_nothing(app_qt, controller,
+                                                     monkeypatch):
+    """Cancelling must leave every event exactly as it was."""
+    from PyQt5.QtWidgets import QMessageBox
+    from app.gui.main_window import MainWindow
+    from app.gui.theme import load_theme
+
+    # Give one event audio so there is something to clear.
+    import numpy as np
+    from app.audio.wavio import write_wav_atomic
+    import tempfile, os
+
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, "original.wav")
+    write_wav_atomic(path, np.zeros(4800, dtype=np.float32), SR)
+    event_id = controller.list_events()[0].event_id
+    controller.db.set_audio_path(event_id, path)
+    controller.db.set_audio_state(event_id, audio_bytes=os.path.getsize(path),
+                                  available=True)
+
+    # exec_ is a blocking modal event loop.  It has to be stubbed or the test
+    # waits for a key press that will never come; the click is then decided
+    # by what clickedButton reports.
+    monkeypatch.setattr(QMessageBox, "exec_", lambda self: None)
+    monkeypatch.setattr(QMessageBox, "clickedButton",
+                        lambda self: QMessageBox.Cancel)
+    window = MainWindow(controller, load_theme("dark"))
+    try:
+        before = controller.db.get_event(event_id)
+        assert before.audio_available is True
+        window._on_clear_unreviewed_audio()
+        for _ in range(20):
+            app_qt.processEvents()
+        after = controller.db.get_event(event_id)
+        assert after.audio_available is True, "cancelling still cleared audio"
+        assert os.path.exists(path)
+        assert "nothing was cleared" in window.status_label.text().lower()
+    finally:
+        window.close()
+        controller.db.close()
+
+
+# ======================================================================
+# Timestamps are shown in system time
+# ======================================================================
+class TestLocalTimestamps:
+    """Timestamps are stored in UTC and must be *shown* in system time.
+
+    Storing UTC is right: a record has to mean the same instant on any
+    machine, through any daylight-saving change.  Showing UTC to someone whose
+    day runs on their own clock is simply wrong - a recording at 04:45 UTC was
+    made at 21:45 the previous evening, and near midday it looks like it
+    belongs to a different day entirely.
+    """
+
+    def _fixed_zone(self, monkeypatch, name):
+        """Pin the process timezone so the assertions are deterministic."""
+        import time as _time
+
+        monkeypatch.setenv("TZ", name)
+        _time.tzset()
+        return name
+
+    def test_a_utc_timestamp_is_shown_in_local_time(self, monkeypatch):
+        import datetime
+        from app.gui.formatting import clock_time
+
+        # Etc/GMT+7 is UTC-7 (POSIX sign convention) and needs no tzdata.
+        self._fixed_zone(monkeypatch, "Etc/GMT+7")
+        stored = "2026-09-28T04:45:00+00:00"
+        assert clock_time(stored) == "21:45:00"
+
+    def test_it_is_not_a_string_slice(self, monkeypatch):
+        """The old behaviour sliced the ISO string and showed UTC."""
+        import datetime
+        from app.gui.formatting import clock_time
+
+        self._fixed_zone(monkeypatch, "Etc/GMT+7")
+        stored = "2026-09-28T04:45:00+00:00"
+        naive_slice = stored.split("T", 1)[1][:8]
+        assert clock_time(stored) != naive_slice
+        assert clock_time(stored) == "21:45:00"
+
+    def test_the_date_rolls_back_near_midnight(self, monkeypatch):
+        import datetime
+        from app.gui.formatting import local_stamp
+
+        self._fixed_zone(monkeypatch, "Etc/GMT+7")
+        # 00:10 UTC on the 28th is 17:10 on the 27th, locally.
+        assert local_stamp("2026-09-28T00:10:00+00:00") == "2026-09-27 17:10:00"
+
+    def test_a_z_suffix_is_accepted(self, monkeypatch):
+        from app.gui.formatting import clock_time
+
+        self._fixed_zone(monkeypatch, "Etc/GMT+7")
+        assert clock_time("2026-09-28T04:45:00Z") == "21:45:00"
+
+    def test_a_naive_timestamp_is_treated_as_utc(self, monkeypatch):
+        """Older records have no offset; they were written as UTC."""
+        from app.gui.formatting import clock_time
+
+        self._fixed_zone(monkeypatch, "Etc/GMT+7")
+        assert clock_time("2026-09-28T04:45:00") == "21:45:00"
+
+    def test_garbage_is_surfaced_not_crashed_on(self):
+        from app.gui.formatting import clock_time, local_stamp
+
+        for bad in (None, "", "not a time", "2026-13-45T99:99:99+00:00"):
+            assert isinstance(clock_time(bad), str)
+            assert isinstance(local_stamp(bad), str)
+
+    def test_the_row_tooltip_carries_the_date(self, monkeypatch, populated):
+        from app.gui.formatting import build_row
+
+        self._fixed_zone(monkeypatch, "Etc/GMT+7")
+        row = build_row(populated.get_event("event_000000"))
+        # The full local date and time, so an event near midnight is not
+        # ambiguous, and it is what the tooltip shows.
+        assert "2026-" in row.when and len(row.when) == 19
+        assert row.when in row.tooltip()
+        # The compact column is still just the clock.
+        assert len(row.time) == 8

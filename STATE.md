@@ -28,6 +28,19 @@ event. `tools/separation_check.py` proves the whole AGENTS.md section 26 chain:
 the separated audio correlates **-0.013** with the input mixture, where a
 filtered copy would be ≈1.0. See `docs/SOURCE_SEPARATION.md` section 17.
 
+**Timestamps are shown in system time.** They are stored in UTC, which is
+right, and converted for display - showing UTC put events up to a day out and,
+near midday, in the wrong day entirely.
+
+**The continuous-recording chunk length is adjustable from the running GUI**,
+on the Live tab, via a control file the capture process polls. The file being
+written is neither cut short nor extended, and the panel shows the length
+actually in force rather than the one requested.
+
+**A button clears the audio of every unreviewed event**, keeping all 232
+fingerprints, measurements and annotations, and always confirming first. Events
+a human has judged are unreachable by it, and separation output is kept.
+
 **Similar events are clickable.** The Similar tab lists the closest stored
 events as a table; clicking one opens it in the window, so it can be judged,
 played or separated without hunting for it in the list. The event number is
@@ -52,7 +65,7 @@ meter and a scrolling level trace. The capture process publishes it to
 separate processes and the window otherwise cannot ask whether audio is
 arriving right now. Verified against a real phone on 8190.
 
-**633 tests passing**, stable across repeated runs.
+**682 tests passing**, stable across repeated runs.
 
 ## Port allocation
 

@@ -39,6 +39,7 @@ from .audio.network import (
     NetworkSource,
 )
 from .config import AppConfig
+from .control import ControlWatcher
 from .livestatus import LiveStatusPublisher
 from .pipeline import AudioPipeline
 
@@ -213,6 +214,27 @@ def _run_network(config: AppConfig, args: argparse.Namespace) -> int:
     return _drive(config, source, args)
 
 
+def _apply_control(pipeline, control, live, config: AppConfig) -> None:
+    """Honour a control request, and record what is actually in force.
+
+    The published status carries the value in force rather than the one
+    requested, so a request that was refused cannot be mistaken for one that
+    worked.
+    """
+    recorder = pipeline.recorder
+    if recorder is None:
+        return
+    current = recorder.chunk_seconds
+    requested = control.poll(current)
+    if requested is not None and recorder.set_chunk_seconds(requested):
+        print(f"  recording chunk length now {requested:g}s "
+              f"(from the next chunk)")
+    if control.last_error:
+        print(f"  control: {control.last_error}")
+        control.last_error = None
+    live.set_chunk_seconds(recorder.chunk_seconds)
+
+
 def _drive(config: AppConfig, source, args: argparse.Namespace) -> int:
     os.makedirs(args.output, exist_ok=True)
     print(f"recording to : {os.path.abspath(args.output)}")
@@ -225,6 +247,10 @@ def _drive(config: AppConfig, source, args: argparse.Namespace) -> int:
     # otherwise has no way to ask whether the phone is actually sending audio.
     live = LiveStatusPublisher(args.output, sample_rate=config.sample_rate,
                                source=source)
+    # The window can ask for a different continuous-recording chunk length
+    # while capture runs; this is the half that honours it.
+    control = ControlWatcher(args.output)
+    live.set_chunk_seconds(config.record.chunk_seconds)
 
     pipeline = AudioPipeline(
         config, source, record=not args.no_record, record_directory=args.output
@@ -271,6 +297,7 @@ def _drive(config: AppConfig, source, args: argparse.Namespace) -> int:
     try:
         while pipeline.running and not stopping["flag"]:
             time.sleep(0.1)
+            _apply_control(pipeline, control, live, config)
             live.publish()
             now = time.monotonic()
             if deadline and now >= deadline:

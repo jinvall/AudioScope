@@ -282,6 +282,14 @@ sees 16-bit or 44.1 kHz.
 
 ### 5.2 The event list
 
+Times are shown in **your machine's system timezone**, converted from the UTC
+they are stored in. Storing UTC is deliberate — a record has to mean the same
+instant on any machine, through any daylight-saving change — but showing UTC
+to someone whose day runs on their own clock is simply wrong: a recording at
+04:45 UTC was made at 21:45 the previous evening. Near midnight an event also
+belongs to a different *day* than its stored timestamp suggests, so the
+tooltip carries the full local date and time.
+
 Columns are **Event, Time, Duration, Decision, Label**. The event number is
 first because it is the handle everything else uses: the separation CLI takes
 it as `--event`, the metadata file names it, the similarity results quote it.
@@ -369,6 +377,7 @@ stalled or unavailable.
 | **level** | Current level in dBFS, with the peak |
 | The trace | A scrolling level trace of the incoming audio |
 | The footer | Where the status file is, and the sender's config keys |
+| **Recording chunk** | How long each continuous recording file runs for, changeable while capture runs (§10.2) |
 
 The level trace is one RMS value per analysis frame: it shows **when** audio
 arrived and **how loud** it was. It cannot show the shape of a transient — use
@@ -588,9 +597,24 @@ overwrites an earlier one.
 
 ### 10.2 Continuous recordings
 
-`recordings/` holds the continuous stream in 15-minute chunks
-(`record.chunk_seconds`), kept separately from events. This directory also
-holds `capture.log` and the live status file.
+`recordings/` holds the continuous stream in chunks, kept separately from
+events. This directory also holds `capture.log`, the live status file, and the
+control file the window uses to ask capture for changes.
+
+**The chunk length can be changed while the window is open**, from the
+**Recording chunk** selector on the Live tab: 1, 2, 5, 10, 15, 30 or 60
+minutes. The file being written is neither cut short nor extended — it
+finishes at the length it started with, and the new length applies when the
+writer next rolls over. The label beside the selector shows the length
+**actually in force**, not the one that was asked for, so a refused request is
+visible rather than assumed.
+
+The default is 15 minutes (`record.chunk_seconds` in the configuration file).
+Shorter chunks mean more files and more per-file overhead; longer chunks mean
+more audio at risk if the process is interrupted.
+
+> A capture process started **before** this feature existed will not honour
+> requests — it has no code to read them. Restart capture once to pick it up.
 
 ### 10.3 The database
 
@@ -1077,6 +1101,7 @@ Byte caps — §10.4, §12.2
 Back to original — §5.3, §8.1
 
 **C**
+Capture control — §10.2
 Change point — §4.2, §18
 Classification — §9, §18
 Click-to-seek — §5.3
@@ -1159,6 +1184,7 @@ Query — §7, §18
 **R**
 Realtime ratio — §7.4, §16, §18
 Recording chunks — §10.2
+Recording chunk, adjustable — §5.4, §10.2
 Region selection — §8
 `recordings/` — §10.2, §13
 `--recordings` — §11.1, §17.12
@@ -1185,6 +1211,7 @@ Separation environment — §2.3
 **T**
 Table of contents — top of document
 Tabs — §5.4
+Timezone — §5.2
 Text size — §5.5
 Troubleshooting — §15
 Trust and confidence — §1, §9

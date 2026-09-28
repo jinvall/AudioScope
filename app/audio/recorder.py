@@ -109,6 +109,40 @@ class Recorder:
         self._thread.start()
 
     # ------------------------------------------------------------------
+    @property
+    def chunk_seconds(self) -> float:
+        """The chunk length in force, which a control request can change."""
+        writer = self._writer
+        if writer is None or not self.config.sample_rate:
+            return 0.0
+        return writer.chunk_frames / float(self.config.sample_rate)
+
+    def set_chunk_seconds(self, seconds: float) -> bool:
+        """Change the chunk length for the *next* chunk.  Returns True if applied.
+
+        The chunk being written now is not cut short and not extended: it
+        finishes at the length it started with, and the new length takes effect
+        when the writer next rolls over.  Anything else would either truncate
+        a recording that is in progress or silently keep the old value until
+        the next restart, and both are worse than waiting for the next file.
+
+        ``WavWriter`` reads ``chunk_frames`` on every append, so this is a
+        single attribute write and the writer thread picks it up immediately.
+        """
+        from ..control import MAX_CHUNK_SECONDS, MIN_CHUNK_SECONDS
+
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            return False
+        if not (MIN_CHUNK_SECONDS <= seconds <= MAX_CHUNK_SECONDS):
+            return False
+        writer = self._writer
+        if writer is None:
+            return False
+        writer.chunk_frames = max(1, int(seconds * self.config.sample_rate))
+        return True
+
     def write(self, samples: np.ndarray) -> bool:
         """Hand a block to the writer thread.  Never blocks.
 

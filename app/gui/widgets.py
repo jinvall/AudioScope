@@ -450,6 +450,9 @@ class EventListWidget(QWidget):
     """
 
     event_selected = pyqtSignal(str)
+    #: The operator asked to clear the audio of the unreviewed events.  The
+    #: window asks for confirmation; the widget never acts on its own.
+    clear_unreviewed_requested = pyqtSignal()
 
     def __init__(self, theme, parent=None):
         super().__init__(parent)
@@ -466,6 +469,19 @@ class EventListWidget(QWidget):
         title.setObjectName("Heading")
         header.addWidget(title)
         header.addStretch(1)
+        # Beside the count, because it is an action over the list as a whole
+        # rather than over the selected event.
+        self.clear_unreviewed_button = QPushButton("Clear unreviewed audio")
+        self.clear_unreviewed_button.setToolTip(
+            "Free the disk space taken by events you have not reviewed yet. "
+            "Their audio is deleted; their fingerprints, measurements and any "
+            "notes are kept, so they stay comparable and searchable. You will "
+            "be asked to confirm."
+        )
+        self.clear_unreviewed_button.clicked.connect(
+            self.clear_unreviewed_requested.emit
+        )
+        header.addWidget(self.clear_unreviewed_button)
         self._count = QLabel("0")
         self._count.setObjectName("Subtle")
         header.addWidget(self._count)
@@ -1297,3 +1313,73 @@ class SimilarListWidget(QWidget):
         event_id = item.data(0, Qt.UserRole)
         if event_id:
             self.event_activated.emit(str(event_id))
+
+
+class RecordingControlWidget(QWidget):
+    """The continuous-recording chunk length, adjustable while capture runs.
+
+    It belongs here, on the Live tab, rather than behind a launch flag: it is
+    a setting *capture* applies, and capture is what this tab is reporting on.
+    Asking the operator to restart the window to shorten a file that is being
+    written right now is not a reasonable answer to "I want smaller chunks".
+
+    The chunk being written is never cut short and never extended.  The new
+    length applies when the writer next rolls over, and the label shows the
+    length actually in force - not the one that was asked for - so a refused
+    request is visible rather than assumed.
+    """
+
+    #: A new chunk length was chosen, in seconds.
+    chunk_seconds_requested = pyqtSignal(float)
+
+    #: Offered in minutes, because that is how the value is thought about.
+    CHOICES = (
+        ("1 min", 60.0), ("2 min", 120.0), ("5 min", 300.0),
+        ("10 min", 600.0), ("15 min", 900.0), ("30 min", 1800.0),
+        ("60 min", 3600.0),
+    )
+
+    def __init__(self, theme, parent=None):
+        super().__init__(parent)
+        self._theme = theme
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("Recording chunk"))
+        self.box = QComboBox()
+        for label, seconds in self.CHOICES:
+            self.box.addItem(label, seconds)
+        self.box.setToolTip(
+            "How long each continuous recording file runs for. Takes effect "
+            "from the next file; the one being written finishes as it is."
+        )
+        self.box.currentIndexChanged.connect(self._on_chosen)
+        layout.addWidget(self.box)
+
+        self.in_force = QLabel("in force: unknown")
+        self.in_force.setObjectName("Subtle")
+        layout.addWidget(self.in_force)
+        layout.addStretch(1)
+
+    def _on_chosen(self, index: int) -> None:
+        seconds = self.box.itemData(index)
+        if seconds:
+            self.chunk_seconds_requested.emit(float(seconds))
+
+    def set_in_force(self, seconds: Optional[float]) -> None:
+        """Show the length capture is actually using, and sync the selector."""
+        if seconds is None or not seconds:
+            self.in_force.setText("in force: unknown")
+            return
+        self.in_force.setText(f"in force: {seconds:g} s")
+        index = self.box.findData(float(seconds))
+        if index >= 0 and index != self.box.currentIndex():
+            # blockSignals: reflecting the value capture reported must not be
+            # read back as a new request, or the two would echo forever.
+            self.box.blockSignals(True)
+            self.box.setCurrentIndex(index)
+            self.box.blockSignals(False)
+
+    def requested(self) -> Optional[float]:
+        return self.box.itemData(self.box.currentIndex())
